@@ -1174,7 +1174,6 @@ def results():
             "report": request.form.get("report_text", "")
         }
         sset("approved", approved_data)
-        # Update database with approved report
         report_id = sget("report_id")
         if report_id:
             try:
@@ -1188,11 +1187,169 @@ def results():
                     conn.commit()
             except Exception as e:
                 print(f"Approval update error: {e}")
+        return redirect(url_for("patient_report", report_id=report_id))
     return render(RESULTS_HTML,
                   result=sget("result"),
                   report_draft=sget("report_draft", ""),
                   approved=sget("approved"))
 
+
+
+PATIENT_REPORT_HTML = """<!DOCTYPE html><html><head><title>Symbiosis — Your Report</title>
+<style>""" + CSS + """
+.report-body{font-size:15px;line-height:1.9;color:#1a1a1a}
+.report-body h2{font-family:'DM Serif Display',serif;font-size:20px;margin:28px 0 10px;color:#1a1a1a}
+.report-body h3{font-size:15px;font-weight:600;margin:20px 0 6px;color:#2D6A4F}
+.focus-card{background:#F0F7F4;border-left:3px solid #2D6A4F;border-radius:0 12px 12px 0;padding:14px 18px;margin-bottom:12px}
+.focus-label{font-size:11px;font-weight:600;color:#2D6A4F;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
+.focus-title{font-size:15px;font-weight:600;color:#1a1a1a;margin-bottom:8px}
+.focus-row{font-size:13px;color:#374151;margin-bottom:4px;line-height:1.5}
+.next-test{background:#fff;border:1px solid #E8E4DF;border-radius:12px;padding:14px 18px;display:flex;align-items:center;gap:16px;margin-top:8px}
+.next-test-icon{width:40px;height:40px;background:#F0F7F4;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
+</style></head>
+<body><div class="wrap">
+<div class="brand">Symbiosis <span>Health</span></div>
+<p class="sub">{{ patient_name }} · Reviewed by Dr. {{ doctor_name }}</p>
+
+{% set cat=risk_category %}
+{% set cc="#166534" if cat=="low" else "#92400e" if cat=="moderate" else "#b91c1c" %}
+{% set bg="#f0fdf4" if cat=="low" else "#fffbeb" if cat=="moderate" else "#fef2f2" %}
+
+<div class="card">
+<div style="display:flex;gap:24px;align-items:center">
+<div>
+<div style="font-size:64px;font-weight:600;color:{{ cc }};line-height:1;font-family:'DM Serif Display',serif">{{ sa_risk_score }}</div>
+<div style="font-size:11px;color:#6b7280;margin-top:4px">SA Risk Index / 100</div>
+<div style="display:inline-block;margin-top:8px;font-size:12px;font-weight:600;padding:4px 14px;border-radius:20px;background:{{ bg }};color:{{ cc }}">{{ risk_category_label }}</div>
+</div>
+<div style="flex:1">
+<div class="stat-g">
+{% for lbl,val,col in domain_stats %}
+<div class="stat"><div class="sn" style="color:{{ col }}">{{ val }}</div><div class="sl2">{{ lbl }}</div></div>
+{% endfor %}
+</div>
+</div>
+</div>
+</div>
+
+{% if high_markers %}
+<div class="card"><p class="sl">High risk markers</p>
+{% for m in high_markers %}
+<div class="mrow"><span style="font-size:13px;font-weight:600">{{ m.name }}</span>
+<div style="display:flex;align-items:center;gap:10px">
+<span style="font-size:13px;color:#b91c1c;font-weight:600">{{ m.value }} {{ m.unit }}</span>
+<span class="pill pr">HIGH</span></div></div>
+{% endfor %}</div>
+{% endif %}
+
+{% if borderline_markers %}
+<div class="card"><p class="sl">Borderline markers</p>
+{% for m in borderline_markers %}
+<div class="mrow"><span style="font-size:13px">{{ m.name }}</span>
+<div style="display:flex;align-items:center;gap:10px">
+<span style="font-size:13px;color:#92400e">{{ m.value }} {{ m.unit }}</span>
+<span class="pill pa">BORDERLINE</span></div></div>
+{% endfor %}</div>
+{% endif %}
+
+{% if patterns %}
+<div class="card"><p class="sl">Patterns detected</p>
+{% for pt in patterns %}
+<div class="pc {{ 'ph' if pt.severity=='high' else 'pm' }}">
+<div class="pt" style="color:{{ '#991b1b' if pt.severity=='high' else '#92400e' }}">{{ pt.name }} — {{ pt.severity }}</div>
+<div class="pb2" style="color:{{ '#b91c1c' if pt.severity=='high' else '#a16207' }}">{{ pt.evidence }}</div>
+</div>{% endfor %}</div>
+{% endif %}
+
+<div class="card">
+<p class="sl">Your personalised report</p>
+<div class="report-body">{{ report_text | replace("## ", "<h2>") | replace("### ", "<h3>") | replace("**Focus", "<div class='focus-card'><div class='focus-label'>Focus</div><div class='focus-title'>") | safe }}</div>
+</div>
+
+<div class="card">
+<p class="sl">Next steps</p>
+<div class="next-test">
+<div class="next-test-icon">📅</div>
+<div>
+<div style="font-size:14px;font-weight:600;color:#1a1a1a">Schedule your next panel</div>
+<div style="font-size:13px;color:#6b7280;margin-top:2px">Retest metabolic markers in 3 months. Full panel in 6 months.</div>
+</div>
+</div>
+</div>
+
+<div class="row" style="margin-top:6px">
+<a href="/" class="btns">← New patient</a>
+<a href="/admin" class="btns">Admin →</a>
+</div>
+</div></body></html>"""
+
+
+@app.route("/report/<report_id>")
+def patient_report(report_id):
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM reports WHERE id=%s", (report_id,))
+                row = cur.fetchone()
+        if not row:
+            return redirect(url_for("intake"))
+        row = dict(row)
+        patterns_raw = json.loads(row.get("patterns", "[]"))
+        lab_values = json.loads(row.get("lab_values", "{}"))
+
+        # Rebuild marker display from stored lab values
+        high_markers = []
+        borderline_markers = []
+        for key, value in lab_values.items():
+            if key in MARKERS and value is not None:
+                defn = MARKERS[key]
+                status = _score_marker(value, defn)
+                entry = {"name": defn["name"], "value": value, "unit": defn["unit"]}
+                if status == "high":
+                    high_markers.append(entry)
+                elif status == "borderline":
+                    borderline_markers.append(entry)
+
+        # Rebuild pattern display
+        pattern_names = {
+            "ir": "Insulin Resistance Cluster",
+            "cvd": "Cardiovascular Risk Cluster",
+            "b12": "B12-Folate-Homocysteine Alert",
+            "nafld": "SA Lean NAFLD Pattern",
+            "thyroid": "Thyroid-Metabolic Pattern",
+            "anaemia": "Nutritional Anaemia Pattern",
+            "kidney": "Early Kidney Stress Pattern",
+        }
+        patterns = [{"name": pattern_names.get(p, p), "severity": "high", "evidence": ""} for p in patterns_raw]
+
+        cat = row.get("risk_category", "moderate")
+        score = row.get("sa_risk_score", 0)
+        cat_label = {"low": "Low risk", "moderate": "Moderate risk", "high": "High risk", "very_high": "Very high risk"}.get(cat, "")
+
+        domain_stats = [
+            ("SA Risk Score", score, "#b91c1c" if score >= 75 else "#92400e" if score >= 50 else "#166534"),
+            ("High risk", len(high_markers), "#b91c1c"),
+            ("Borderline", len(borderline_markers), "#92400e"),
+        ]
+
+        report_text = row.get("report_text", "")
+
+        return render(PATIENT_REPORT_HTML,
+            patient_name=row.get("patient_name", "Patient"),
+            doctor_name=row.get("doctor_name", "Symbiosis"),
+            sa_risk_score=score,
+            risk_category=cat,
+            risk_category_label=cat_label,
+            domain_stats=domain_stats,
+            high_markers=high_markers,
+            borderline_markers=borderline_markers,
+            patterns=patterns,
+            report_text=report_text,
+            report_id=report_id,
+        )
+    except Exception as e:
+        print(f"Patient report error: {e}")
+        return redirect(url_for("intake"))
 
 @app.route("/admin")
 def admin():
