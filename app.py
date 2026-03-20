@@ -1226,7 +1226,7 @@ PATIENT_REPORT_HTML = """<!DOCTYPE html><html><head><title>Symbiosis — Your Re
 <body><div class="wrap">
 
 <div class="brand">Symbiosis <span>Health</span></div>
-<p class="sub">{{ patient_name }} &nbsp;·&nbsp; Reviewed by Dr. {{ doctor_name }}</p>
+<p class="sub">{{ patient_name }} &nbsp;·&nbsp; Reviewed by {{ doctor_name }}</p>
 
 {% set cat=risk_category %}
 {% set cc="#166534" if cat=="low" else "#92400e" if cat=="moderate" else "#b91c1c" %}
