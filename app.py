@@ -27,41 +27,46 @@ def init_db():
         conn = get_db()
         conn.run("""
             CREATE TABLE IF NOT EXISTS patients (
-                id          TEXT PRIMARY KEY,
-                created_at  TEXT NOT NULL,
-                name        TEXT,
-                age         INTEGER,
-                gender      TEXT,
-                bmi         REAL,
-                vegetarian  BOOLEAN,
-                family_cvd_before_60 BOOLEAN,
-                family_diabetes BOOLEAN,
-                confirmed_fasting BOOLEAN,
+                id                         TEXT PRIMARY KEY,
+                created_at                 TEXT NOT NULL,
+                name                       TEXT,
+                age                        INTEGER,
+                gender                     TEXT,
+                bmi                        REAL,
+                vegetarian                 BOOLEAN,
+                family_cvd_before_60       BOOLEAN,
+                family_diabetes            BOOLEAN,
+                confirmed_fasting          BOOLEAN,
                 illness_or_vaccination_14d BOOLEAN,
-                biotin_within_72hrs BOOLEAN
-            )
-        """)
-        conn.run("""
-            CREATE TABLE IF NOT EXISTS reports (
-                id          TEXT PRIMARY KEY,
-                created_at  TEXT NOT NULL,
-                patient_name TEXT,
-                age         INTEGER,
-                gender      TEXT,
-                bmi         REAL,
-                vegetarian  BOOLEAN,
-                sa_risk_score INTEGER,
-                risk_category TEXT,
-                patterns    TEXT,
-                lab_values  TEXT,
-                report_text TEXT,
-                doctor_name TEXT,
-                approved    BOOLEAN DEFAULT FALSE
+                biotin_within_72hrs        BOOLEAN
             )
         """)
         conn.close()
     except Exception as e:
-        print(f"DB init error: {e}")
+        print(f"DB init patients error: {e}")
+    try:
+        conn = get_db()
+        conn.run("""
+            CREATE TABLE IF NOT EXISTS reports (
+                id            TEXT PRIMARY KEY,
+                created_at    TEXT NOT NULL,
+                patient_name  TEXT,
+                age           INTEGER,
+                gender        TEXT,
+                bmi           REAL,
+                vegetarian    BOOLEAN,
+                sa_risk_score INTEGER,
+                risk_category TEXT,
+                patterns      TEXT,
+                lab_values    TEXT,
+                report_text   TEXT,
+                doctor_name   TEXT,
+                approved      BOOLEAN DEFAULT FALSE
+            )
+        """)
+        conn.close()
+    except Exception as e:
+        print(f"DB init reports error: {e}")
 
 init_db()
 
