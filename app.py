@@ -1206,40 +1206,62 @@ def results():
 
 PATIENT_REPORT_HTML = """<!DOCTYPE html><html><head><title>Symbiosis — Your Report</title>
 <style>""" + CSS + """
-.report-body{font-size:15px;line-height:1.9;color:#1a1a1a}
-.report-body h2{font-family:'DM Serif Display',serif;font-size:20px;margin:28px 0 10px;color:#1a1a1a}
-.report-body h3{font-size:15px;font-weight:600;margin:20px 0 6px;color:#2D6A4F}
-.focus-card{background:#F0F7F4;border-left:3px solid #2D6A4F;border-radius:0 12px 12px 0;padding:14px 18px;margin-bottom:12px}
-.focus-label{font-size:11px;font-weight:600;color:#2D6A4F;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
-.focus-title{font-size:15px;font-weight:600;color:#1a1a1a;margin-bottom:8px}
-.focus-row{font-size:13px;color:#374151;margin-bottom:4px;line-height:1.5}
-.next-test{background:#fff;border:1px solid #E8E4DF;border-radius:12px;padding:14px 18px;display:flex;align-items:center;gap:16px;margin-top:8px}
-.next-test-icon{width:40px;height:40px;background:#F0F7F4;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
+.score-ring{width:120px;height:120px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;border:6px solid currentColor;flex-shrink:0}
+.score-num{font-family:'DM Serif Display',serif;font-size:40px;font-weight:600;line-height:1}
+.score-lbl{font-size:10px;color:#6b7280;margin-top:2px}
+.domain-bar-wrap{margin-bottom:10px}
+.domain-name{font-size:12px;color:#6b7280;margin-bottom:4px;display:flex;justify-content:space-between}
+.domain-track{height:8px;background:#F3F0EC;border-radius:4px;overflow:hidden}
+.domain-fill{height:8px;border-radius:4px}
+.rec-section{margin-bottom:20px}
+.rec-title{font-size:13px;font-weight:600;color:#2D6A4F;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #E8E4DF}
+.rec-item{display:flex;gap:10px;margin-bottom:8px;align-items:flex-start}
+.rec-bullet{width:6px;height:6px;border-radius:50%;background:#2D6A4F;margin-top:6px;flex-shrink:0}
+.rec-text{font-size:13px;color:#374151;line-height:1.6}
+.next-test{background:#F0F7F4;border-radius:12px;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+.next-test-left{display:flex;align-items:center;gap:14px}
+.next-test-icon{width:44px;height:44px;background:#fff;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;border:1px solid #A7D7C5}
+.next-test-btn{background:#2D6A4F;color:#fff;border:none;border-radius:10px;padding:10px 20px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap}
 </style></head>
 <body><div class="wrap">
+
 <div class="brand">Symbiosis <span>Health</span></div>
-<p class="sub">{{ patient_name }} · Reviewed by Dr. {{ doctor_name }}</p>
+<p class="sub">{{ patient_name }} &nbsp;·&nbsp; Reviewed by Dr. {{ doctor_name }}</p>
 
 {% set cat=risk_category %}
 {% set cc="#166534" if cat=="low" else "#92400e" if cat=="moderate" else "#b91c1c" %}
 {% set bg="#f0fdf4" if cat=="low" else "#fffbeb" if cat=="moderate" else "#fef2f2" %}
 
 <div class="card">
-<div style="display:flex;gap:24px;align-items:center">
-<div>
-<div style="font-size:64px;font-weight:600;color:{{ cc }};line-height:1;font-family:'DM Serif Display',serif">{{ sa_risk_score }}</div>
-<div style="font-size:11px;color:#6b7280;margin-top:4px">SA Risk Index / 100</div>
-<div style="display:inline-block;margin-top:8px;font-size:12px;font-weight:600;padding:4px 14px;border-radius:20px;background:{{ bg }};color:{{ cc }}">{{ risk_category_label }}</div>
+<div style="display:flex;gap:28px;align-items:center">
+  <div class="score-ring" style="color:{{ cc }};background:{{ bg }}">
+    <div class="score-num" style="color:{{ cc }}">{{ sa_risk_score }}</div>
+    <div class="score-lbl">out of 100</div>
+  </div>
+  <div style="flex:1">
+    <div style="font-size:18px;font-weight:600;color:{{ cc }};margin-bottom:4px">{{ risk_category_label }}</div>
+    <div style="font-size:13px;color:#6b7280;margin-bottom:16px">SA Risk Index — scored against South Asian-specific thresholds</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+      <div class="stat"><div class="sn" style="color:#b91c1c">{{ high_count }}</div><div class="sl2">High risk</div></div>
+      <div class="stat"><div class="sn" style="color:#92400e">{{ borderline_count }}</div><div class="sl2">Borderline</div></div>
+      <div class="stat"><div class="sn" style="color:#166534">{{ optimal_count }}</div><div class="sl2">Optimal</div></div>
+    </div>
+  </div>
 </div>
-<div style="flex:1">
-<div class="stat-g">
-{% for lbl,val,col in domain_stats %}
-<div class="stat"><div class="sn" style="color:{{ col }}">{{ val }}</div><div class="sl2">{{ lbl }}</div></div>
+</div>
+
+{% if domain_bars %}
+<div class="card">
+<p class="sl">Domain scores</p>
+{% for d in domain_bars %}
+{% set c="#166534" if d.pct<30 else "#92400e" if d.pct<60 else "#b91c1c" %}
+<div class="domain-bar-wrap">
+  <div class="domain-name"><span>{{ d.label }}</span><span style="font-weight:600;color:{{ c }}">{{ d.pct }}</span></div>
+  <div class="domain-track"><div class="domain-fill" style="width:{{ d.pct }}%;background:{{ c }}"></div></div>
+</div>
 {% endfor %}
 </div>
-</div>
-</div>
-</div>
+{% endif %}
 
 {% if high_markers %}
 <div class="card"><p class="sl">High risk markers</p>
@@ -1261,32 +1283,37 @@ PATIENT_REPORT_HTML = """<!DOCTYPE html><html><head><title>Symbiosis — Your Re
 {% endfor %}</div>
 {% endif %}
 
-{% if patterns %}
-<div class="card"><p class="sl">Patterns detected</p>
-{% for pt in patterns %}
-<div class="pc {{ 'ph' if pt.severity=='high' else 'pm' }}">
-<div class="pt" style="color:{{ '#991b1b' if pt.severity=='high' else '#92400e' }}">{{ pt.name }} — {{ pt.severity }}</div>
-<div class="pb2" style="color:{{ '#b91c1c' if pt.severity=='high' else '#a16207' }}">{{ pt.evidence }}</div>
-</div>{% endfor %}</div>
+{% if recommendations %}
+<div class="card">
+<p class="sl">Your personalised recommendations</p>
+{% for section in recommendations %}
+<div class="rec-section">
+  <div class="rec-title">{{ section.title }}</div>
+  {% for item in section.items %}
+  <div class="rec-item">
+    <div class="rec-bullet"></div>
+    <div class="rec-text">{{ item }}</div>
+  </div>
+  {% endfor %}
+</div>
+{% endfor %}
+</div>
 {% endif %}
 
 <div class="card">
-<p class="sl">Your personalised report</p>
-<div class="report-body">{{ report_text | replace("## ", "<h2>") | replace("### ", "<h3>") | replace("**Focus", "<div class='focus-card'><div class='focus-label'>Focus</div><div class='focus-title'>") | safe }}</div>
-</div>
-
-<div class="card">
-<p class="sl">Next steps</p>
 <div class="next-test">
-<div class="next-test-icon">📅</div>
-<div>
-<div style="font-size:14px;font-weight:600;color:#1a1a1a">Schedule your next panel</div>
-<div style="font-size:13px;color:#6b7280;margin-top:2px">Retest metabolic markers in 3 months. Full panel in 6 months.</div>
-</div>
+  <div class="next-test-left">
+    <div class="next-test-icon">📅</div>
+    <div>
+      <div style="font-size:14px;font-weight:600;color:#1a1a1a">Schedule your next panel</div>
+      <div style="font-size:13px;color:#6b7280;margin-top:2px">Retest metabolic markers in 3 months · Full panel in 6 months</div>
+    </div>
+  </div>
+  <button class="next-test-btn" onclick="alert('Booking coming soon — your Symbiosis team will reach out.')">Book now →</button>
 </div>
 </div>
 
-<div class="row" style="margin-top:6px">
+<div class="row" style="margin-top:6px;margin-bottom:32px">
 <a href="/" class="btns">← New patient</a>
 <a href="/admin" class="btns">Admin →</a>
 </div>
@@ -1335,13 +1362,53 @@ def patient_report(report_id):
         score = row.get("sa_risk_score", 0)
         cat_label = {"low": "Low risk", "moderate": "Moderate risk", "high": "High risk", "very_high": "Very high risk"}.get(cat, "")
 
-        domain_stats = [
-            ("SA Risk Score", score, "#b91c1c" if score >= 75 else "#92400e" if score >= 50 else "#166534"),
-            ("High risk", len(high_markers), "#b91c1c"),
-            ("Borderline", len(borderline_markers), "#92400e"),
-        ]
+        # Build domain bars from lab values
+        domain_bars = []
+        for dk, ddef in DOMAINS.items():
+            domain_markers = [
+                (k, v) for k, v in lab_values.items()
+                if k in MARKERS and MARKERS[k]["domain"] == dk and v is not None
+            ]
+            if domain_markers:
+                scored = [_score_marker(v, MARKERS[k]) for k, v in domain_markers]
+                raw = sum(2 if s=="high" else 1 if s=="borderline" else 0 for s in scored)
+                mx = len(scored) * 2
+                pct = round((raw / mx) * 100) if mx else 0
+                domain_bars.append({"label": ddef["label"], "pct": pct})
 
+        # Parse AI report into recommendation sections
         report_text = row.get("report_text", "")
+        recommendations = []
+        section_map = {
+            "Food": "Food",
+            "Movement": "Movement",
+            "Supplements": "Supplements",
+            "Who to see": "Who to see",
+        }
+        current_section = None
+        current_items = []
+        for line in report_text.split("\n"):
+            line = line.strip()
+            for key, label in section_map.items():
+                if key in line and "###" in line:
+                    if current_section and current_items:
+                        recommendations.append({"title": current_section, "items": current_items})
+                    current_section = label
+                    current_items = []
+                    break
+            else:
+                if current_section and line and not line.startswith("#") and len(line) > 20:
+                    # Clean up markdown
+                    line = line.lstrip("- •*").strip()
+                    if line:
+                        current_items.append(line)
+        if current_section and current_items:
+            recommendations.append({"title": current_section, "items": current_items})
+
+        optimal_count = sum(
+            1 for k, v in lab_values.items()
+            if k in MARKERS and v is not None and _score_marker(v, MARKERS[k]) == "optimal"
+        )
 
         return render(PATIENT_REPORT_HTML,
             patient_name=row.get("patient_name", "Patient"),
@@ -1349,11 +1416,14 @@ def patient_report(report_id):
             sa_risk_score=score,
             risk_category=cat,
             risk_category_label=cat_label,
-            domain_stats=domain_stats,
+            high_count=len(high_markers),
+            borderline_count=len(borderline_markers),
+            optimal_count=optimal_count,
+            domain_bars=domain_bars,
             high_markers=high_markers,
             borderline_markers=borderline_markers,
             patterns=patterns,
-            report_text=report_text,
+            recommendations=recommendations,
             report_id=report_id,
         )
     except Exception as e:
