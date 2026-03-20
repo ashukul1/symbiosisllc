@@ -1317,6 +1317,166 @@ def results(report_id):
 
 
 
+PATIENT_REPORT_HTML = """<!DOCTYPE html><html><head><title>Symbiosis Health</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=DM+Serif+Display&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#F5F4F1;font-family:'Inter',sans-serif;color:#1a1a1a;font-size:13px}
+.page{max-width:860px;margin:0 auto;padding:24px 16px 48px}
+.topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
+.brand{font-family:'DM Serif Display',serif;font-size:18px;color:#1a1a1a}.brand span{color:#2D6A4F}
+.meta{font-size:12px;color:#9ca3af}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+.card{background:#fff;border-radius:14px;border:1px solid #ECEAE6;padding:16px}
+.lbl{font-size:10px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px}
+.score-hero{display:flex;align-items:center;gap:20px}
+.score-ring{width:88px;height:88px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;border:5px solid currentColor;flex-shrink:0}
+.score-n{font-family:'DM Serif Display',serif;font-size:32px;line-height:1}
+.score-d{font-size:9px;color:#9ca3af;margin-top:1px}
+.risk-badge{display:inline-flex;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;margin-top:8px}
+.stat-mini{text-align:center}
+.stat-n{font-size:22px;font-weight:600;line-height:1;margin-bottom:3px}
+.stat-l{font-size:11px;color:#9ca3af}
+.drow{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.drow:last-child{margin-bottom:0}
+.dlbl{font-size:12px;color:#6b7280;width:140px;flex-shrink:0}
+.dtrack{flex:1;height:5px;background:#F0EEE9;border-radius:3px;overflow:hidden}
+.dfill{height:5px;border-radius:3px}
+.dpct{font-size:11px;font-weight:600;width:28px;text-align:right}
+.mrow{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid #F5F4F1}
+.mrow:last-child{border-bottom:none}
+.mname{font-size:12px;font-weight:500}
+.mval{font-size:12px;font-weight:600}
+.chip{font-size:9px;font-weight:700;padding:2px 7px;border-radius:10px}
+.chip-h{background:#fef2f2;color:#b91c1c}
+.chip-b{background:#fffbeb;color:#92400e}
+.pdot{width:7px;height:7px;border-radius:50%;flex-shrink:0;margin-top:3px}
+.pname{font-size:12px;font-weight:600;margin-bottom:2px}
+.pev{font-size:11px;color:#6b7280;line-height:1.5}
+.rhead{font-size:11px;font-weight:600;color:#2D6A4F;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;margin-top:14px}
+.rhead:first-child{margin-top:0}
+.ritem{display:flex;gap:8px;align-items:flex-start;margin-bottom:5px}
+.rbullet{width:4px;height:4px;border-radius:50%;background:#2D6A4F;margin-top:5px;flex-shrink:0}
+.rtext{font-size:12px;color:#374151;line-height:1.6}
+.intro{font-size:13px;color:#374151;line-height:1.8;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid #F0EEE9}
+.next-bar{background:#F0F7F4;border-radius:12px;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:12px}
+.next-btn{background:#2D6A4F;color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit}
+</style></head>
+<body><div class="page">
+<div class="topbar">
+  <div class="brand">Symbiosis <span>Health</span></div>
+  <div class="meta">{{ patient_name }} &nbsp;·&nbsp; {{ doctor_name }}</div>
+</div>
+{% set cc="#166534" if risk_category=="low" else "#92400e" if risk_category=="moderate" else "#b91c1c" %}
+{% set bg="#f0fdf4" if risk_category=="low" else "#fffbeb" if risk_category=="moderate" else "#fef2f2" %}
+<div class="grid2">
+  <div class="card">
+    <div class="lbl">SA Risk Score</div>
+    <div class="score-hero">
+      <div class="score-ring" style="color:{{ cc }};background:{{ bg }}">
+        <div class="score-n" style="color:{{ cc }}">{{ sa_risk_score }}</div>
+        <div class="score-d">/ 100</div>
+      </div>
+      <div>
+        <div style="font-size:15px;font-weight:600;color:{{ cc }}">{{ risk_category_label }}</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px;line-height:1.5">Scored against SA-specific thresholds from MASALA, INTERHEART & JACC 2023</div>
+        <div class="risk-badge" style="color:{{ cc }};background:{{ bg }}">{{ risk_category_label }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="lbl">Marker summary</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px">
+      <div class="stat-mini"><div class="stat-n" style="color:#b91c1c">{{ high_count }}</div><div class="stat-l">High risk</div></div>
+      <div class="stat-mini"><div class="stat-n" style="color:#92400e">{{ borderline_count }}</div><div class="stat-l">Borderline</div></div>
+      <div class="stat-mini"><div class="stat-n" style="color:#166534">{{ optimal_count }}</div><div class="stat-l">Optimal</div></div>
+    </div>
+    {% if domain_bars %}
+    <div class="lbl">By domain</div>
+    {% for d in domain_bars %}
+    {% set c="#166534" if d.pct<30 else "#92400e" if d.pct<60 else "#b91c1c" %}
+    <div class="drow">
+      <div class="dlbl">{{ d.label }}</div>
+      <div class="dtrack"><div class="dfill" style="width:{{ d.pct }}%;background:{{ c }}"></div></div>
+      <div class="dpct" style="color:{{ c }}">{{ d.pct }}</div>
+    </div>
+    {% endfor %}
+    {% endif %}
+  </div>
+</div>
+<div class="grid2">
+  {% if high_markers %}
+  <div class="card">
+    <div class="lbl">High risk ({{ high_count }})</div>
+    {% for m in high_markers %}
+    <div class="mrow">
+      <div class="mname">{{ m.name }}</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="mval" style="color:#b91c1c">{{ m.value }} {{ m.unit }}</div>
+        <div class="chip chip-h">HIGH</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <div>
+    {% if borderline_markers %}
+    <div class="card" style="margin-bottom:12px">
+      <div class="lbl">Borderline ({{ borderline_count }})</div>
+      {% for m in borderline_markers %}
+      <div class="mrow">
+        <div class="mname">{{ m.name }}</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="mval" style="color:#92400e">{{ m.value }} {{ m.unit }}</div>
+          <div class="chip chip-b">BORDERLINE</div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if patterns %}
+    <div class="card">
+      <div class="lbl">Patterns detected</div>
+      {% for pt in patterns %}
+      <div style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-bottom:1px solid #F5F4F1">
+        <div class="pdot" style="background:{{ '#b91c1c' if pt.severity=='high' else '#f59e0b' }}"></div>
+        <div><div class="pname">{{ pt.name }}</div></div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% if summary_paras or recommendations %}
+<div class="card" style="margin-bottom:12px">
+  {% if summary_paras %}
+  <div class="intro">{{ summary_paras[0] }}</div>
+  {% endif %}
+  {% if recommendations %}
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+    {% for section in recommendations %}
+    <div>
+      <div class="rhead">{{ section.title }}</div>
+      {% for item in section.items[:4] %}
+      <div class="ritem"><div class="rbullet"></div><div class="rtext">{{ item }}</div></div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+<div class="next-bar">
+  <div>
+    <div style="font-size:13px;font-weight:600;color:#1a1a1a">Schedule your next panel</div>
+    <div style="font-size:11px;color:#6b7280;margin-top:2px">Retest metabolic markers in 3 months &nbsp;·&nbsp; Full panel in 6 months</div>
+  </div>
+  <button class="next-btn" onclick="alert('Booking coming soon!')">Book now →</button>
+</div>
+</div></body></html>"""
+
+
 @app.route("/report/<report_id>")
 def patient_report(report_id):
     try:
