@@ -26,6 +26,22 @@ def init_db():
     try:
         conn = get_db()
         conn.run("""
+            CREATE TABLE IF NOT EXISTS patients (
+                id          TEXT PRIMARY KEY,
+                created_at  TEXT NOT NULL,
+                name        TEXT,
+                age         INTEGER,
+                gender      TEXT,
+                bmi         REAL,
+                vegetarian  BOOLEAN,
+                family_cvd_before_60 BOOLEAN,
+                family_diabetes BOOLEAN,
+                confirmed_fasting BOOLEAN,
+                illness_or_vaccination_14d BOOLEAN,
+                biotin_within_72hrs BOOLEAN
+            )
+        """)
+        conn.run("""
             CREATE TABLE IF NOT EXISTS reports (
                 id          TEXT PRIMARY KEY,
                 created_at  TEXT NOT NULL,
@@ -938,7 +954,7 @@ LABS_HTML = """<!DOCTYPE html><html><head><title>Symbiosis — Labs</title>
 <p class="sub">Step 2 of 2 — Enter values from your lab report. Leave blank if not tested.</p>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 <div class="row" style="margin-bottom:18px;margin-top:0">
-<a href="/labs?demo=1" class="btn" style="font-size:12px;padding:8px 16px;text-decoration:none">Load demo values</a>
+<a href="/labs/{{ patient_id }}?demo=1" class="btn" style="font-size:12px;padding:8px 16px;text-decoration:none">Load demo values</a>
 <span style="font-size:12px;color:#9ca3af">or enter manually below</span>
 </div>
 <form method="POST">
@@ -951,6 +967,7 @@ LABS_HTML = """<!DOCTYPE html><html><head><title>Symbiosis — Labs</title>
 </div></div>{% endfor %}
 <div class="row">
 <a href="/" class="btns">← Back</a>
+<input type="hidden" name="patient_id" value="{{ patient_id }}">
 <button type="submit" class="btn">Run SA analysis →</button>
 </div>
 </form></div></body></html>"""
@@ -1027,8 +1044,7 @@ RESULTS_HTML = """<!DOCTYPE html><html><head><title>Symbiosis — Results</title
 <textarea disabled style="min-height:520px;background:#FAFAF9;line-height:1.9;font-size:13px">{{ approved.report }}</textarea>
 {% else %}
 <div class="pending">⏳ Pending physician review. Edit below then approve.</div>
-<form method="POST" action="/results">
-<input type="hidden" name="report_id" value="{{ report_id }}">
+<form method="POST" action="/results/{{ report_id }}">
 <textarea name="report_text" style="min-height:520px;line-height:1.9;font-size:13px">{{ report_draft }}</textarea>
 <div class="row" style="margin-top:14px">
 <input type="text" name="doctor_name" placeholder="Reviewing doctor's full name" required style="flex:1">
@@ -1121,7 +1137,7 @@ def intake():
         h = float(request.form.get("height", 0)) / 100
         w = float(request.form.get("weight", 0))
         bmi = round(w / (h * h), 1) if h > 0 else 0
-        sset("patient", {
+        patient = {
             "name":                    request.form.get("name"),
             "age":                     int(request.form.get("age", 0)),
             "gender":                  request.form.get("gender"),
@@ -1132,15 +1148,53 @@ def intake():
             "confirmed_fasting":       "confirmed_fasting"       in request.form,
             "illness_or_vaccination_14d": "illness_or_vaccination_14d" in request.form,
             "biotin_within_72hrs":     "biotin_within_72hrs"     in request.form,
-        })
-        spop("result"); spop("report_draft"); spop("approved")
-        return redirect(url_for("labs"))
+        }
+        # Save patient to DB and get a patient_id to carry forward
+        patient_id = str(uuid.uuid4())
+        try:
+            conn = get_db()
+            conn.run("""
+                INSERT INTO patients
+                (id, created_at, name, age, gender, bmi, vegetarian,
+                 family_cvd_before_60, family_diabetes,
+                 confirmed_fasting, illness_or_vaccination_14d, biotin_within_72hrs)
+                VALUES (:id,:created_at,:name,:age,:gender,:bmi,:vegetarian,
+                        :family_cvd_before_60,:family_diabetes,
+                        :confirmed_fasting,:illness_or_vaccination_14d,:biotin_within_72hrs)
+            """,
+                id=patient_id,
+                created_at=datetime.utcnow().isoformat(),
+                name=patient["name"],
+                age=patient["age"],
+                gender=patient["gender"],
+                bmi=patient["bmi"],
+                vegetarian=patient["vegetarian"],
+                family_cvd_before_60=patient["family_cvd_before_60"],
+                family_diabetes=patient["family_diabetes"],
+                confirmed_fasting=patient["confirmed_fasting"],
+                illness_or_vaccination_14d=patient["illness_or_vaccination_14d"],
+                biotin_within_72hrs=patient["biotin_within_72hrs"]
+            )
+            conn.close()
+        except Exception as e:
+            print(f"Save patient error: {e}")
+        return redirect(url_for("labs", patient_id=patient_id))
     return render(INTAKE_HTML)
 
 
-@app.route("/labs", methods=["GET", "POST"])
-def labs():
-    if not sget("patient"):
+@app.route("/labs/<patient_id>", methods=["GET", "POST"])
+def labs(patient_id):
+    # Load patient from DB
+    try:
+        conn = get_db()
+        rows = conn.run("SELECT * FROM patients WHERE id=:id", id=patient_id)
+        cols = [c["name"] for c in conn.columns]
+        conn.close()
+        if not rows:
+            return redirect(url_for("intake"))
+        patient = dict(zip(cols, rows[0]))
+    except Exception as e:
+        print(f"Load patient error: {e}")
         return redirect(url_for("intake"))
 
     if request.method == "POST":
@@ -1154,251 +1208,42 @@ def labs():
 
         if len(lab_results) < 5:
             return render(LABS_HTML, fields=LAB_FIELDS,
-                          error="Please enter at least 5 lab values.", labs={})
+                          error="Please enter at least 5 lab values.",
+                          labs={}, patient_id=patient_id)
 
-        er = run_engine(sget("patient"), lab_results)
+        er = run_engine(patient, lab_results)
 
         if er["status"] == "HALTED":
-            sset("result", er); sset("report_draft", ""); spop("approved")
-            return redirect(url_for("results"))
+            report_id = save_report(er, report_text="HALTED")
+            return redirect(url_for("results", report_id=report_id))
 
         report_draft = call_claude(build_report_prompt(er))
         report_id = save_report(er, report_text=report_draft)
-        sset("result", er); sset("report_draft", report_draft)
-        sset("report_id", report_id); spop("approved")
-        return redirect(url_for("results"))
+        return redirect(url_for("results", report_id=report_id))
 
     demo = request.args.get("demo") == "1"
     return render(LABS_HTML, fields=LAB_FIELDS, error=None,
-                  labs=DEMO if demo else {})
+                  labs=DEMO if demo else {}, patient_id=patient_id)
 
 
-@app.route("/results", methods=["GET", "POST"])
-def results():
-    # POST = doctor approval — handle without relying on session
+@app.route("/results/<report_id>", methods=["GET", "POST"])
+def results(report_id):
     if request.method == "POST":
-        report_id = request.form.get("report_id", "") or sget("report_id", "")
         report_text = request.form.get("report_text", "")
         doctor_name = request.form.get("doctor_name", "")
-        if report_id:
-            try:
-                conn = get_db()
-                conn.run("""
-                    UPDATE reports
-                    SET report_text=:report_text, doctor_name=:doctor_name, approved=TRUE
-                    WHERE id=:id
-                """, report_text=report_text, doctor_name=doctor_name, id=report_id)
-                conn.close()
-            except Exception as e:
-                print(f"Approval update error: {e}")
-            return redirect(url_for("patient_report", report_id=report_id))
-        return redirect(url_for("intake"))
-    # GET = show doctor review page
-    if not sget("result"):
-        return redirect(url_for("intake"))
-    return render(RESULTS_HTML,
-                  result=sget("result"),
-                  report_draft=sget("report_draft", ""),
-                  approved=sget("approved"),
-                  report_id=sget("report_id", ""))
+        try:
+            conn = get_db()
+            conn.run("""
+                UPDATE reports
+                SET report_text=:report_text, doctor_name=:doctor_name, approved=TRUE
+                WHERE id=:id
+            """, report_text=report_text, doctor_name=doctor_name, id=report_id)
+            conn.close()
+        except Exception as e:
+            print(f"Approval error: {e}")
+        return redirect(url_for("patient_report", report_id=report_id))
 
-
-
-PATIENT_REPORT_HTML = """<!DOCTYPE html><html><head><title>Symbiosis Health</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=DM+Serif+Display&display=swap');
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:#F5F4F1;font-family:'Inter',sans-serif;color:#1a1a1a;font-size:13px}
-.page{max-width:860px;margin:0 auto;padding:24px 16px 48px}
-.topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
-.brand{font-family:'DM Serif Display',serif;font-size:18px;color:#1a1a1a}.brand span{color:#2D6A4F}
-.patient-meta{font-size:12px;color:#9ca3af}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
-.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}
-.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}
-.card{background:#fff;border-radius:14px;border:1px solid #ECEAE6;padding:16px}
-.card-sm{background:#fff;border-radius:12px;border:1px solid #ECEAE6;padding:14px}
-.label{font-size:10px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px}
-.score-hero{display:flex;align-items:center;gap:20px}
-.score-circle{width:88px;height:88px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;border:5px solid currentColor;flex-shrink:0}
-.score-n{font-family:'DM Serif Display',serif;font-size:32px;line-height:1;font-weight:400}
-.score-d{font-size:9px;color:#9ca3af;margin-top:1px}
-.risk-badge{display:inline-flex;align-items:center;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;margin-top:8px}
-.stat-mini{text-align:center}
-.stat-n{font-size:22px;font-weight:600;line-height:1;margin-bottom:3px}
-.stat-l{font-size:11px;color:#9ca3af}
-.domain-row{display:flex;align-items:center;gap:10px;margin-bottom:8px}
-.domain-row:last-child{margin-bottom:0}
-.domain-lbl{font-size:12px;color:#6b7280;width:140px;flex-shrink:0}
-.domain-track{flex:1;height:5px;background:#F0EEE9;border-radius:3px;overflow:hidden}
-.domain-fill{height:5px;border-radius:3px;transition:width .3s}
-.domain-pct{font-size:11px;font-weight:600;width:28px;text-align:right}
-.marker-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #F5F4F1}
-.marker-row:last-child{border-bottom:none}
-.marker-name{font-size:12px;font-weight:500;color:#1a1a1a}
-.marker-val{font-size:12px;font-weight:600}
-.chip{font-size:9px;font-weight:700;padding:2px 7px;border-radius:10px;letter-spacing:.04em}
-.chip-high{background:#fef2f2;color:#b91c1c}
-.chip-border{background:#fffbeb;color:#92400e}
-.chip-ok{background:#f0fdf4;color:#166534}
-.pattern-item{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid #F5F4F1}
-.pattern-item:last-child{border-bottom:none}
-.pattern-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:3px}
-.pattern-name{font-size:12px;font-weight:600;color:#1a1a1a;margin-bottom:2px}
-.pattern-ev{font-size:11px;color:#6b7280;line-height:1.5}
-.rec-section{margin-bottom:16px}
-.rec-section:last-child{margin-bottom:0}
-.rec-head{font-size:11px;font-weight:600;color:#2D6A4F;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
-.rec-item{display:flex;gap:8px;align-items:flex-start;margin-bottom:6px}
-.rec-bullet{width:4px;height:4px;border-radius:50%;background:#2D6A4F;margin-top:5px;flex-shrink:0}
-.rec-text{font-size:12px;color:#374151;line-height:1.6}
-.summary-text{font-size:12px;color:#374151;line-height:1.8}
-.summary-text p{margin-bottom:10px}
-.summary-text p:last-child{margin-bottom:0}
-.next-bar{background:#F0F7F4;border-radius:12px;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:12px}
-.next-info{font-size:12px;font-weight:600;color:#1a1a1a;margin-bottom:2px}
-.next-sub{font-size:11px;color:#6b7280}
-.next-btn{background:#2D6A4F;color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap}
-.divider{font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.07em;margin:16px 0 10px}
-</style></head>
-<body><div class="page">
-
-<div class="topbar">
-  <div class="brand">Symbiosis <span>Health</span></div>
-  <div class="patient-meta">{{ patient_name }} &nbsp;·&nbsp; {{ doctor_name }}</div>
-</div>
-
-{% set cat=risk_category %}
-{% set cc="#166534" if cat=="low" else "#92400e" if cat=="moderate" else "#b91c1c" %}
-{% set bg="#f0fdf4" if cat=="low" else "#fffbeb" if cat=="moderate" else "#fef2f2" %}
-
-<div class="grid2">
-  <div class="card">
-    <div class="label">SA Risk Score</div>
-    <div class="score-hero">
-      <div class="score-circle" style="color:{{ cc }};background:{{ bg }}">
-        <div class="score-n" style="color:{{ cc }}">{{ sa_risk_score }}</div>
-        <div class="score-d">/ 100</div>
-      </div>
-      <div>
-        <div style="font-size:16px;font-weight:600;color:{{ cc }}">{{ risk_category_label }}</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:4px;line-height:1.5">Scored against South Asian-specific thresholds from MASALA, INTERHEART & JACC 2023</div>
-        <div class="risk-badge" style="color:{{ cc }};background:{{ bg }}">{{ risk_category_label }}</div>
-      </div>
-    </div>
-  </div>
-  <div class="card">
-    <div class="label">Marker summary</div>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px">
-      <div class="stat-mini"><div class="stat-n" style="color:#b91c1c">{{ high_count }}</div><div class="stat-l">High risk</div></div>
-      <div class="stat-mini"><div class="stat-n" style="color:#92400e">{{ borderline_count }}</div><div class="stat-l">Borderline</div></div>
-      <div class="stat-mini"><div class="stat-n" style="color:#166534">{{ optimal_count }}</div><div class="stat-l">Optimal</div></div>
-    </div>
-    {% if domain_bars %}
-    <div class="label">By domain</div>
-    {% for d in domain_bars %}
-    {% set c="#166534" if d.pct<30 else "#92400e" if d.pct<60 else "#b91c1c" %}
-    <div class="domain-row">
-      <div class="domain-lbl">{{ d.label }}</div>
-      <div class="domain-track"><div class="domain-fill" style="width:{{ d.pct }}%;background:{{ c }}"></div></div>
-      <div class="domain-pct" style="color:{{ c }}">{{ d.pct }}</div>
-    </div>
-    {% endfor %}
-    {% endif %}
-  </div>
-</div>
-
-<div class="grid2">
-  {% if high_markers %}
-  <div class="card">
-    <div class="label">High risk markers ({{ high_count }})</div>
-    {% for m in high_markers %}
-    <div class="marker-row">
-      <div class="marker-name">{{ m.name }}</div>
-      <div style="display:flex;align-items:center;gap:8px">
-        <div class="marker-val" style="color:#b91c1c">{{ m.value }} {{ m.unit }}</div>
-        <div class="chip chip-high">HIGH</div>
-      </div>
-    </div>
-    {% endfor %}
-  </div>
-  {% endif %}
-  <div>
-    {% if borderline_markers %}
-    <div class="card" style="margin-bottom:12px">
-      <div class="label">Borderline markers ({{ borderline_count }})</div>
-      {% for m in borderline_markers %}
-      <div class="marker-row">
-        <div class="marker-name">{{ m.name }}</div>
-        <div style="display:flex;align-items:center;gap:8px">
-          <div class="marker-val" style="color:#92400e">{{ m.value }} {{ m.unit }}</div>
-          <div class="chip chip-border">BORDERLINE</div>
-        </div>
-      </div>
-      {% endfor %}
-    </div>
-    {% endif %}
-    {% if patterns %}
-    <div class="card">
-      <div class="label">Patterns detected</div>
-      {% for pt in patterns %}
-      <div class="pattern-item">
-        <div class="pattern-dot" style="background:{{ '#b91c1c' if pt.severity=='high' else '#f59e0b' }}"></div>
-        <div>
-          <div class="pattern-name">{{ pt.name }}</div>
-          {% if pt.evidence %}<div class="pattern-ev">{{ pt.evidence }}</div>{% endif %}
-        </div>
-      </div>
-      {% endfor %}
-    </div>
-    {% endif %}
-  </div>
-</div>
-
-{% if recommendations %}
-<div class="card" style="margin-bottom:12px">
-  <div class="label">Your personalised recommendations</div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
-    {% for section in recommendations %}
-    <div class="rec-section">
-      <div class="rec-head">{{ section.title }}</div>
-      {% for item in section.items[:4] %}
-      <div class="rec-item">
-        <div class="rec-bullet"></div>
-        <div class="rec-text">{{ item }}</div>
-      </div>
-      {% endfor %}
-    </div>
-    {% endfor %}
-  </div>
-</div>
-{% endif %}
-
-{% if summary_paras %}
-<div class="card" style="margin-bottom:12px">
-  <div class="label">Doctor's summary</div>
-  <div class="summary-text">
-    {% for para in summary_paras %}
-    <p>{{ para }}</p>
-    {% endfor %}
-  </div>
-</div>
-{% endif %}
-
-<div class="next-bar">
-  <div>
-    <div class="next-info">Schedule your next panel</div>
-    <div class="next-sub">Retest metabolic markers in 3 months &nbsp;·&nbsp; Full panel in 6 months</div>
-  </div>
-  <button class="next-btn" onclick="alert('Booking coming soon — your Symbiosis team will be in touch.')">Book now →</button>
-</div>
-
-</div></body></html>"""
-
-
-@app.route("/report/<report_id>")
-def patient_report(report_id):
+    # GET — load report from DB for doctor review
     try:
         conn = get_db()
         rows = conn.run("SELECT * FROM reports WHERE id=:id", id=report_id)
@@ -1407,167 +1252,67 @@ def patient_report(report_id):
         if not rows:
             return redirect(url_for("intake"))
         row = dict(zip(cols, rows[0]))
-        patterns_raw = json.loads(row.get("patterns", "[]"))
-        lab_values = json.loads(row.get("lab_values", "{}"))
-
-        # Rebuild marker display from stored lab values
-        high_markers = []
-        borderline_markers = []
-        for key, value in lab_values.items():
-            if key in MARKERS and value is not None:
-                defn = MARKERS[key]
-                status = _score_marker(value, defn)
-                entry = {"name": defn["name"], "value": value, "unit": defn["unit"]}
-                if status == "high":
-                    high_markers.append(entry)
-                elif status == "borderline":
-                    borderline_markers.append(entry)
-
-        # Rebuild pattern display
-        pattern_names = {
-            "ir": "Insulin Resistance Cluster",
-            "cvd": "Cardiovascular Risk Cluster",
-            "b12": "B12-Folate-Homocysteine Alert",
-            "nafld": "SA Lean NAFLD Pattern",
-            "thyroid": "Thyroid-Metabolic Pattern",
-            "anaemia": "Nutritional Anaemia Pattern",
-            "kidney": "Early Kidney Stress Pattern",
-        }
-        patterns = [{"name": pattern_names.get(p, p), "severity": "high", "evidence": ""} for p in patterns_raw]
-
-        cat = row.get("risk_category", "moderate")
-        score = row.get("sa_risk_score", 0)
-        cat_label = {"low": "Low risk", "moderate": "Moderate risk", "high": "High risk", "very_high": "Very high risk"}.get(cat, "")
-
-        # Build domain bars from lab values
-        domain_bars = []
-        for dk, ddef in DOMAINS.items():
-            domain_markers = [
-                (k, v) for k, v in lab_values.items()
-                if k in MARKERS and MARKERS[k]["domain"] == dk and v is not None
-            ]
-            if domain_markers:
-                scored = [_score_marker(v, MARKERS[k]) for k, v in domain_markers]
-                raw = sum(2 if s=="high" else 1 if s=="borderline" else 0 for s in scored)
-                mx = len(scored) * 2
-                pct = round((raw / mx) * 100) if mx else 0
-                domain_bars.append({"label": ddef["label"], "pct": pct})
-
-        # Parse AI report into recommendation sections
-        report_text = row.get("report_text", "")
-        recommendations = []
-        section_map = {
-            "Food": "Food",
-            "Movement": "Movement",
-            "Supplements": "Supplements",
-            "Who to see": "Who to see",
-        }
-        current_section = None
-        current_items = []
-        for line in report_text.split("\n"):
-            line = line.strip()
-            for key, label in section_map.items():
-                if key in line and "###" in line:
-                    if current_section and current_items:
-                        recommendations.append({"title": current_section, "items": current_items})
-                    current_section = label
-                    current_items = []
-                    break
-            else:
-                if current_section and line and not line.startswith("#") and len(line) > 20:
-                    # Clean up markdown
-                    line = line.lstrip("- •*").strip()
-                    if line:
-                        current_items.append(line)
-        if current_section and current_items:
-            recommendations.append({"title": current_section, "items": current_items})
-
-        optimal_count = sum(
-            1 for k, v in lab_values.items()
-            if k in MARKERS and v is not None and _score_marker(v, MARKERS[k]) == "optimal"
-        )
-
-        # Extract summary paragraphs (first section before ### headers)
-        summary_paras = []
-        for line in report_text.split("\n"):
-            line = line.strip()
-            if line.startswith("###"):
-                break
-            if line.startswith("##"):
-                continue
-            if line and len(line) > 30:
-                summary_paras.append(line)
-
-        return render(PATIENT_REPORT_HTML,
-            patient_name=row.get("patient_name", "Patient"),
-            doctor_name=row.get("doctor_name", "Symbiosis"),
-            sa_risk_score=score,
-            risk_category=cat,
-            risk_category_label=cat_label,
-            high_count=len(high_markers),
-            borderline_count=len(borderline_markers),
-            optimal_count=optimal_count,
-            domain_bars=domain_bars,
-            high_markers=high_markers,
-            borderline_markers=borderline_markers,
-            patterns=patterns,
-            recommendations=recommendations,
-            summary_paras=summary_paras[:4],
-            report_id=report_id,
-        )
     except Exception as e:
-        print(f"Patient report error: {e}")
+        print(f"Load report error: {e}")
         return redirect(url_for("intake"))
 
-@app.route("/admin")
-def admin():
-    reports = get_recent_reports(50)
-    rows = ""
-    for r in reports:
-        patterns = ", ".join(json.loads(r["patterns"])) if r["patterns"] else "none"
-        approved = "✓" if r["approved"] else "pending"
-        rows += f"""
-        <tr>
-            <td>{r['created_at'][:10]}</td>
-            <td>{r['patient_name'] or '—'}</td>
-            <td>{r['age'] or '—'}</td>
-            <td>{r['gender'] or '—'}</td>
-            <td>{r['bmi'] or '—'}</td>
-            <td style="font-weight:600;color:{'#b91c1c' if (r['sa_risk_score'] or 0) >= 75 else '#92400e' if (r['sa_risk_score'] or 0) >= 50 else '#166534'}">{r['sa_risk_score']}</td>
-            <td>{r['risk_category'] or '—'}</td>
-            <td style="font-size:11px">{patterns}</td>
-            <td>{approved}</td>
-        </tr>"""
-    return f"""<!DOCTYPE html><html><head><title>Symbiosis — Admin</title>
-    <style>
-    body{{font-family:'DM Sans',sans-serif;padding:32px;background:#F7F5F2;color:#1a1a1a}}
-    h1{{font-size:20px;margin-bottom:8px}}
-    p{{font-size:13px;color:#6b7280;margin-bottom:24px}}
-    table{{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #E8E4DF}}
-    th{{font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.08em;padding:10px 14px;text-align:left;border-bottom:1px solid #E8E4DF}}
-    td{{font-size:13px;padding:10px 14px;border-bottom:1px solid #F3F0EC}}
-    tr:last-child td{{border-bottom:none}}
-    </style></head>
-    <body>
-    <h1>Symbiosis Health — Reports</h1>
-    <p>{len(reports)} reports total</p>
-    <table>
-    <tr>
-        <th>Date</th><th>Patient</th><th>Age</th><th>Gender</th>
-        <th>BMI</th><th>Score</th><th>Category</th><th>Patterns</th><th>Status</th>
-    </tr>
-    {rows if rows else '<tr><td colspan="9" style="text-align:center;color:#9ca3af;padding:24px">No reports yet</td></tr>'}
-    </table>
-    <br><a href="/" style="font-size:13px;color:#2D6A4F">← New patient</a>
-    </body></html>"""
+    er = {
+        "status": "HALTED" if row.get("report_text") == "HALTED" else "OK",
+        "saRiskScore": row.get("sa_risk_score", 0),
+        "riskCategory": row.get("risk_category", "moderate"),
+        "riskCategoryLabel": {"low": "Low risk", "moderate": "Moderate risk", "high": "High risk", "very_high": "Very high risk"}.get(row.get("risk_category", "moderate"), ""),
+        "criticalValues": [],
+        "patternsDetected": [],
+        "highRiskMarkers": [],
+        "borderlineMarkers": [],
+        "domainScores": {},
+        "summary": {"totalTested": 0, "totalOptimal": 0, "totalBorderline": 0, "totalHighRisk": 0, "totalExcluded": 0, "totalNotTested": 0, "patternsCount": 0},
+        "patient": {
+            "name": row.get("patient_name"),
+            "age": row.get("age"),
+            "gender": row.get("gender"),
+            "bmi": row.get("bmi"),
+            "bmiCategory": "Normal",
+            "vegetarian": row.get("vegetarian"),
+        }
+    }
+
+    # Rebuild markers from stored lab values
+    lab_values = json.loads(row.get("lab_values", "{}"))
+    mr = {}
+    for key, value in lab_values.items():
+        if key in MARKERS and value is not None:
+            defn = MARKERS[key]
+            status = _score_marker(value, defn)
+            entry = {"key": key, "name": defn["name"], "value": value, "unit": defn["unit"],
+                     "domain": defn["domain"], "weight": defn["weight"],
+                     "status": status, "excluded": False,
+                     "rawScore": 2 if status=="high" else 1 if status=="borderline" else 0}
+            mr[key] = entry
+            if status == "high":
+                er["highRiskMarkers"].append(entry)
+            elif status == "borderline":
+                er["borderlineMarkers"].append(entry)
+
+    er["summary"]["totalHighRisk"] = len(er["highRiskMarkers"])
+    er["summary"]["totalBorderline"] = len(er["borderlineMarkers"])
+    er["summary"]["totalOptimal"] = sum(1 for m in mr.values() if m["status"]=="optimal")
+    er["summary"]["totalTested"] = len(mr)
+
+    approved = None
+    if row.get("approved") and row.get("doctor_name"):
+        approved = {"doctor": row.get("doctor_name"), "report": row.get("report_text")}
+
+    return render(RESULTS_HTML,
+                  result=er,
+                  report_draft=row.get("report_text", ""),
+                  approved=approved,
+                  report_id=report_id)
 
 
 @app.route("/new")
 def new_patient():
-    sclear()
     return redirect(url_for("intake"))
-
-
 # ═══════════════════════════════════════════════════════════════════
 # LAUNCH
 # ═══════════════════════════════════════════════════════════════════
