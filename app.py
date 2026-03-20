@@ -729,7 +729,7 @@ def call_claude(prompt, max_tokens=3000):
                 "max_tokens": max_tokens,
                 "messages": [{"role": "user", "content": prompt}]
             },
-            timeout=120
+            timeout=25
         )
         data = r.json()
         if "error" in data:
