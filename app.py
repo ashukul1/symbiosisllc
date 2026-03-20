@@ -1204,119 +1204,196 @@ def results():
 
 
 
-PATIENT_REPORT_HTML = """<!DOCTYPE html><html><head><title>Symbiosis — Your Report</title>
-<style>""" + CSS + """
-.score-ring{width:120px;height:120px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;border:6px solid currentColor;flex-shrink:0}
-.score-num{font-family:'DM Serif Display',serif;font-size:40px;font-weight:600;line-height:1}
-.score-lbl{font-size:10px;color:#6b7280;margin-top:2px}
-.domain-bar-wrap{margin-bottom:10px}
-.domain-name{font-size:12px;color:#6b7280;margin-bottom:4px;display:flex;justify-content:space-between}
-.domain-track{height:8px;background:#F3F0EC;border-radius:4px;overflow:hidden}
-.domain-fill{height:8px;border-radius:4px}
-.rec-section{margin-bottom:20px}
-.rec-title{font-size:13px;font-weight:600;color:#2D6A4F;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #E8E4DF}
-.rec-item{display:flex;gap:10px;margin-bottom:8px;align-items:flex-start}
-.rec-bullet{width:6px;height:6px;border-radius:50%;background:#2D6A4F;margin-top:6px;flex-shrink:0}
-.rec-text{font-size:13px;color:#374151;line-height:1.6}
-.next-test{background:#F0F7F4;border-radius:12px;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px}
-.next-test-left{display:flex;align-items:center;gap:14px}
-.next-test-icon{width:44px;height:44px;background:#fff;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;border:1px solid #A7D7C5}
-.next-test-btn{background:#2D6A4F;color:#fff;border:none;border-radius:10px;padding:10px 20px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap}
+PATIENT_REPORT_HTML = """<!DOCTYPE html><html><head><title>Symbiosis Health</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=DM+Serif+Display&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#F5F4F1;font-family:'Inter',sans-serif;color:#1a1a1a;font-size:13px}
+.page{max-width:860px;margin:0 auto;padding:24px 16px 48px}
+.topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
+.brand{font-family:'DM Serif Display',serif;font-size:18px;color:#1a1a1a}.brand span{color:#2D6A4F}
+.patient-meta{font-size:12px;color:#9ca3af}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}
+.card{background:#fff;border-radius:14px;border:1px solid #ECEAE6;padding:16px}
+.card-sm{background:#fff;border-radius:12px;border:1px solid #ECEAE6;padding:14px}
+.label{font-size:10px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px}
+.score-hero{display:flex;align-items:center;gap:20px}
+.score-circle{width:88px;height:88px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;border:5px solid currentColor;flex-shrink:0}
+.score-n{font-family:'DM Serif Display',serif;font-size:32px;line-height:1;font-weight:400}
+.score-d{font-size:9px;color:#9ca3af;margin-top:1px}
+.risk-badge{display:inline-flex;align-items:center;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;margin-top:8px}
+.stat-mini{text-align:center}
+.stat-n{font-size:22px;font-weight:600;line-height:1;margin-bottom:3px}
+.stat-l{font-size:11px;color:#9ca3af}
+.domain-row{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.domain-row:last-child{margin-bottom:0}
+.domain-lbl{font-size:12px;color:#6b7280;width:140px;flex-shrink:0}
+.domain-track{flex:1;height:5px;background:#F0EEE9;border-radius:3px;overflow:hidden}
+.domain-fill{height:5px;border-radius:3px;transition:width .3s}
+.domain-pct{font-size:11px;font-weight:600;width:28px;text-align:right}
+.marker-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #F5F4F1}
+.marker-row:last-child{border-bottom:none}
+.marker-name{font-size:12px;font-weight:500;color:#1a1a1a}
+.marker-val{font-size:12px;font-weight:600}
+.chip{font-size:9px;font-weight:700;padding:2px 7px;border-radius:10px;letter-spacing:.04em}
+.chip-high{background:#fef2f2;color:#b91c1c}
+.chip-border{background:#fffbeb;color:#92400e}
+.chip-ok{background:#f0fdf4;color:#166534}
+.pattern-item{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid #F5F4F1}
+.pattern-item:last-child{border-bottom:none}
+.pattern-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:3px}
+.pattern-name{font-size:12px;font-weight:600;color:#1a1a1a;margin-bottom:2px}
+.pattern-ev{font-size:11px;color:#6b7280;line-height:1.5}
+.rec-section{margin-bottom:16px}
+.rec-section:last-child{margin-bottom:0}
+.rec-head{font-size:11px;font-weight:600;color:#2D6A4F;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
+.rec-item{display:flex;gap:8px;align-items:flex-start;margin-bottom:6px}
+.rec-bullet{width:4px;height:4px;border-radius:50%;background:#2D6A4F;margin-top:5px;flex-shrink:0}
+.rec-text{font-size:12px;color:#374151;line-height:1.6}
+.summary-text{font-size:12px;color:#374151;line-height:1.8}
+.summary-text p{margin-bottom:10px}
+.summary-text p:last-child{margin-bottom:0}
+.next-bar{background:#F0F7F4;border-radius:12px;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:12px}
+.next-info{font-size:12px;font-weight:600;color:#1a1a1a;margin-bottom:2px}
+.next-sub{font-size:11px;color:#6b7280}
+.next-btn{background:#2D6A4F;color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap}
+.divider{font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.07em;margin:16px 0 10px}
 </style></head>
-<body><div class="wrap">
+<body><div class="page">
 
-<div class="brand">Symbiosis <span>Health</span></div>
-<p class="sub">{{ patient_name }} &nbsp;·&nbsp; Reviewed by {{ doctor_name }}</p>
+<div class="topbar">
+  <div class="brand">Symbiosis <span>Health</span></div>
+  <div class="patient-meta">{{ patient_name }} &nbsp;·&nbsp; {{ doctor_name }}</div>
+</div>
 
 {% set cat=risk_category %}
 {% set cc="#166534" if cat=="low" else "#92400e" if cat=="moderate" else "#b91c1c" %}
 {% set bg="#f0fdf4" if cat=="low" else "#fffbeb" if cat=="moderate" else "#fef2f2" %}
 
-<div class="card">
-<div style="display:flex;gap:28px;align-items:center">
-  <div class="score-ring" style="color:{{ cc }};background:{{ bg }}">
-    <div class="score-num" style="color:{{ cc }}">{{ sa_risk_score }}</div>
-    <div class="score-lbl">out of 100</div>
-  </div>
-  <div style="flex:1">
-    <div style="font-size:18px;font-weight:600;color:{{ cc }};margin-bottom:4px">{{ risk_category_label }}</div>
-    <div style="font-size:13px;color:#6b7280;margin-bottom:16px">SA Risk Index — scored against South Asian-specific thresholds</div>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
-      <div class="stat"><div class="sn" style="color:#b91c1c">{{ high_count }}</div><div class="sl2">High risk</div></div>
-      <div class="stat"><div class="sn" style="color:#92400e">{{ borderline_count }}</div><div class="sl2">Borderline</div></div>
-      <div class="stat"><div class="sn" style="color:#166534">{{ optimal_count }}</div><div class="sl2">Optimal</div></div>
+<div class="grid2">
+  <div class="card">
+    <div class="label">SA Risk Score</div>
+    <div class="score-hero">
+      <div class="score-circle" style="color:{{ cc }};background:{{ bg }}">
+        <div class="score-n" style="color:{{ cc }}">{{ sa_risk_score }}</div>
+        <div class="score-d">/ 100</div>
+      </div>
+      <div>
+        <div style="font-size:16px;font-weight:600;color:{{ cc }}">{{ risk_category_label }}</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px;line-height:1.5">Scored against South Asian-specific thresholds from MASALA, INTERHEART & JACC 2023</div>
+        <div class="risk-badge" style="color:{{ cc }};background:{{ bg }}">{{ risk_category_label }}</div>
+      </div>
     </div>
   </div>
-</div>
+  <div class="card">
+    <div class="label">Marker summary</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px">
+      <div class="stat-mini"><div class="stat-n" style="color:#b91c1c">{{ high_count }}</div><div class="stat-l">High risk</div></div>
+      <div class="stat-mini"><div class="stat-n" style="color:#92400e">{{ borderline_count }}</div><div class="stat-l">Borderline</div></div>
+      <div class="stat-mini"><div class="stat-n" style="color:#166534">{{ optimal_count }}</div><div class="stat-l">Optimal</div></div>
+    </div>
+    {% if domain_bars %}
+    <div class="label">By domain</div>
+    {% for d in domain_bars %}
+    {% set c="#166534" if d.pct<30 else "#92400e" if d.pct<60 else "#b91c1c" %}
+    <div class="domain-row">
+      <div class="domain-lbl">{{ d.label }}</div>
+      <div class="domain-track"><div class="domain-fill" style="width:{{ d.pct }}%;background:{{ c }}"></div></div>
+      <div class="domain-pct" style="color:{{ c }}">{{ d.pct }}</div>
+    </div>
+    {% endfor %}
+    {% endif %}
+  </div>
 </div>
 
-{% if domain_bars %}
-<div class="card">
-<p class="sl">Domain scores</p>
-{% for d in domain_bars %}
-{% set c="#166534" if d.pct<30 else "#92400e" if d.pct<60 else "#b91c1c" %}
-<div class="domain-bar-wrap">
-  <div class="domain-name"><span>{{ d.label }}</span><span style="font-weight:600;color:{{ c }}">{{ d.pct }}</span></div>
-  <div class="domain-track"><div class="domain-fill" style="width:{{ d.pct }}%;background:{{ c }}"></div></div>
+<div class="grid2">
+  {% if high_markers %}
+  <div class="card">
+    <div class="label">High risk markers ({{ high_count }})</div>
+    {% for m in high_markers %}
+    <div class="marker-row">
+      <div class="marker-name">{{ m.name }}</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="marker-val" style="color:#b91c1c">{{ m.value }} {{ m.unit }}</div>
+        <div class="chip chip-high">HIGH</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <div>
+    {% if borderline_markers %}
+    <div class="card" style="margin-bottom:12px">
+      <div class="label">Borderline markers ({{ borderline_count }})</div>
+      {% for m in borderline_markers %}
+      <div class="marker-row">
+        <div class="marker-name">{{ m.name }}</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="marker-val" style="color:#92400e">{{ m.value }} {{ m.unit }}</div>
+          <div class="chip chip-border">BORDERLINE</div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if patterns %}
+    <div class="card">
+      <div class="label">Patterns detected</div>
+      {% for pt in patterns %}
+      <div class="pattern-item">
+        <div class="pattern-dot" style="background:{{ '#b91c1c' if pt.severity=='high' else '#f59e0b' }}"></div>
+        <div>
+          <div class="pattern-name">{{ pt.name }}</div>
+          {% if pt.evidence %}<div class="pattern-ev">{{ pt.evidence }}</div>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
 </div>
-{% endfor %}
-</div>
-{% endif %}
-
-{% if high_markers %}
-<div class="card"><p class="sl">High risk markers</p>
-{% for m in high_markers %}
-<div class="mrow"><span style="font-size:13px;font-weight:600">{{ m.name }}</span>
-<div style="display:flex;align-items:center;gap:10px">
-<span style="font-size:13px;color:#b91c1c;font-weight:600">{{ m.value }} {{ m.unit }}</span>
-<span class="pill pr">HIGH</span></div></div>
-{% endfor %}</div>
-{% endif %}
-
-{% if borderline_markers %}
-<div class="card"><p class="sl">Borderline markers</p>
-{% for m in borderline_markers %}
-<div class="mrow"><span style="font-size:13px">{{ m.name }}</span>
-<div style="display:flex;align-items:center;gap:10px">
-<span style="font-size:13px;color:#92400e">{{ m.value }} {{ m.unit }}</span>
-<span class="pill pa">BORDERLINE</span></div></div>
-{% endfor %}</div>
-{% endif %}
 
 {% if recommendations %}
-<div class="card">
-<p class="sl">Your personalised recommendations</p>
-{% for section in recommendations %}
-<div class="rec-section">
-  <div class="rec-title">{{ section.title }}</div>
-  {% for item in section.items %}
-  <div class="rec-item">
-    <div class="rec-bullet"></div>
-    <div class="rec-text">{{ item }}</div>
+<div class="card" style="margin-bottom:12px">
+  <div class="label">Your personalised recommendations</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+    {% for section in recommendations %}
+    <div class="rec-section">
+      <div class="rec-head">{{ section.title }}</div>
+      {% for item in section.items[:4] %}
+      <div class="rec-item">
+        <div class="rec-bullet"></div>
+        <div class="rec-text">{{ item }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endfor %}
   </div>
-  {% endfor %}
-</div>
-{% endfor %}
 </div>
 {% endif %}
 
-<div class="card">
-<div class="next-test">
-  <div class="next-test-left">
-    <div class="next-test-icon">📅</div>
-    <div>
-      <div style="font-size:14px;font-weight:600;color:#1a1a1a">Schedule your next panel</div>
-      <div style="font-size:13px;color:#6b7280;margin-top:2px">Retest metabolic markers in 3 months · Full panel in 6 months</div>
-    </div>
+{% if summary_paras %}
+<div class="card" style="margin-bottom:12px">
+  <div class="label">Doctor's summary</div>
+  <div class="summary-text">
+    {% for para in summary_paras %}
+    <p>{{ para }}</p>
+    {% endfor %}
   </div>
-  <button class="next-test-btn" onclick="alert('Booking coming soon — your Symbiosis team will reach out.')">Book now →</button>
 </div>
+{% endif %}
+
+<div class="next-bar">
+  <div>
+    <div class="next-info">Schedule your next panel</div>
+    <div class="next-sub">Retest metabolic markers in 3 months &nbsp;·&nbsp; Full panel in 6 months</div>
+  </div>
+  <button class="next-btn" onclick="alert('Booking coming soon — your Symbiosis team will be in touch.')">Book now →</button>
 </div>
 
-<div class="row" style="margin-top:6px;margin-bottom:32px">
-<a href="/" class="btns">← New patient</a>
-<a href="/admin" class="btns">Admin →</a>
-</div>
 </div></body></html>"""
 
 
@@ -1410,6 +1487,17 @@ def patient_report(report_id):
             if k in MARKERS and v is not None and _score_marker(v, MARKERS[k]) == "optimal"
         )
 
+        # Extract summary paragraphs (first section before ### headers)
+        summary_paras = []
+        for line in report_text.split("\n"):
+            line = line.strip()
+            if line.startswith("###"):
+                break
+            if line.startswith("##"):
+                continue
+            if line and len(line) > 30:
+                summary_paras.append(line)
+
         return render(PATIENT_REPORT_HTML,
             patient_name=row.get("patient_name", "Patient"),
             doctor_name=row.get("doctor_name", "Symbiosis"),
@@ -1424,6 +1512,7 @@ def patient_report(report_id):
             borderline_markers=borderline_markers,
             patterns=patterns,
             recommendations=recommendations,
+            summary_paras=summary_paras[:4],
             report_id=report_id,
         )
     except Exception as e:
