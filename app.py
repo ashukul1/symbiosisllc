@@ -1458,7 +1458,7 @@ body{background:#F5F4F1;font-family:'Inter',sans-serif;color:#1a1a1a;font-size:1
     {% for section in recommendations %}
     <div>
       <div class="rhead">{{ section.title }}</div>
-      {% for item in section.items[:4] %}
+      {% for item in section.bullets[:4] %}
       <div class="ritem"><div class="rbullet"></div><div class="rtext">{{ item }}</div></div>
       {% endfor %}
     </div>
@@ -1543,7 +1543,7 @@ def patient_report(report_id):
         for key, label in section_map.items():
             if key in line and "###" in line:
                 if current_section and current_items:
-                    recommendations.append({"title": current_section, "items": current_items})
+                    recommendations.append({"title": current_section, "bullets": current_items})
                 current_section = label
                 current_items = []
                 break
@@ -1553,7 +1553,7 @@ def patient_report(report_id):
                 if line:
                     current_items.append(line)
     if current_section and current_items:
-        recommendations.append({"title": current_section, "items": current_items})
+        recommendations.append({"title": current_section, "bullets": current_items})
 
     # Summary paragraphs
     summary_paras = []
