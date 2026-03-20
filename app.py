@@ -1028,6 +1028,7 @@ RESULTS_HTML = """<!DOCTYPE html><html><head><title>Symbiosis — Results</title
 {% else %}
 <div class="pending">⏳ Pending physician review. Edit below then approve.</div>
 <form method="POST" action="/results">
+<input type="hidden" name="report_id" value="{{ report_id }}">
 <textarea name="report_text" style="min-height:520px;line-height:1.9;font-size:13px">{{ report_draft }}</textarea>
 <div class="row" style="margin-top:14px">
 <input type="text" name="doctor_name" placeholder="Reviewing doctor's full name" required style="flex:1">
@@ -1182,7 +1183,7 @@ def results():
             "report": request.form.get("report_text", "")
         }
         sset("approved", approved_data)
-        report_id = sget("report_id")
+        report_id = sget("report_id") or request.form.get("report_id", "")
         if report_id:
             try:
                 conn = get_db()
@@ -1200,7 +1201,8 @@ def results():
     return render(RESULTS_HTML,
                   result=sget("result"),
                   report_draft=sget("report_draft", ""),
-                  approved=sget("approved"))
+                  approved=sget("approved"),
+                  report_id=sget("report_id", ""))
 
 
 
