@@ -1020,7 +1020,7 @@ RESULTS_HTML = """<!DOCTYPE html><html><head><title>Symbiosis — Results</title
 <textarea disabled style="min-height:520px;background:#FAFAF9;line-height:1.9;font-size:13px">{{ approved.report }}</textarea>
 {% else %}
 <div class="pending">⏳ Pending physician review. Edit below then approve.</div>
-<form method="POST">
+<form method="POST" action="/results">
 <textarea name="report_text" style="min-height:520px;line-height:1.9;font-size:13px">{{ report_draft }}</textarea>
 <div class="row" style="margin-top:14px">
 <input type="text" name="doctor_name" placeholder="Reviewing doctor's full name" required style="flex:1">
@@ -1187,7 +1187,9 @@ def results():
                     conn.commit()
             except Exception as e:
                 print(f"Approval update error: {e}")
-        return redirect(url_for("patient_report", report_id=report_id))
+        if report_id:
+            return redirect(url_for("patient_report", report_id=report_id))
+        return redirect(url_for("intake"))
     return render(RESULTS_HTML,
                   result=sget("result"),
                   report_draft=sget("report_draft", ""),
