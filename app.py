@@ -1,6 +1,41 @@
-import os, requests, uuid
+import os, requests, uuid, sqlite3, json
+from datetime import datetime
 from flask import Flask, request, redirect, url_for, session
 from jinja2 import Environment
+
+# ═══════════════════════════════════════════════════════════════════
+# DATABASE
+# ═══════════════════════════════════════════════════════════════════
+DB_PATH = os.environ.get("DB_PATH", "symbiosis.db")
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    with get_db() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS reports (
+                id          TEXT PRIMARY KEY,
+                created_at  TEXT NOT NULL,
+                patient_name TEXT,
+                age         INTEGER,
+                gender      TEXT,
+                bmi         REAL,
+                vegetarian  INTEGER,
+                sa_risk_score INTEGER,
+                risk_category TEXT,
+                patterns    TEXT,
+                lab_values  TEXT,
+                report_text TEXT,
+                doctor_name TEXT,
+                approved    INTEGER DEFAULT 0
+            )
+        """)
+        conn.commit()
+
+init_db()
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "symbiosis-2025-sa")
@@ -729,7 +764,7 @@ def call_claude(prompt, max_tokens=3000):
                 "max_tokens": max_tokens,
                 "messages": [{"role": "user", "content": prompt}]
             },
-            timeout= 115
+            timeout=120
         )
         data = r.json()
         if "error" in data:
@@ -1004,6 +1039,56 @@ def render(template, **kwargs):
 
 
 # ═══════════════════════════════════════════════════════════════════
+# DATABASE HELPERS
+# ═══════════════════════════════════════════════════════════════════
+def save_report(er, report_text="", doctor_name="", approved=False):
+    patient = er.get("patient", {})
+    report_id = str(uuid.uuid4())
+    patterns = json.dumps([p["id"] for p in er.get("patternsDetected", [])])
+    lab_values = json.dumps({
+        m["key"]: m["value"]
+        for m in er.get("markerResults", {}).values()
+        if m.get("value") is not None
+    })
+    with get_db() as conn:
+        conn.execute("""
+            INSERT INTO reports
+            (id, created_at, patient_name, age, gender, bmi, vegetarian,
+             sa_risk_score, risk_category, patterns, lab_values,
+             report_text, doctor_name, approved)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            report_id,
+            datetime.utcnow().isoformat(),
+            patient.get("name", ""),
+            patient.get("age"),
+            patient.get("gender"),
+            patient.get("bmi"),
+            1 if patient.get("vegetarian") else 0,
+            er.get("saRiskScore"),
+            er.get("riskCategory"),
+            patterns,
+            lab_values,
+            report_text,
+            doctor_name,
+            1 if approved else 0
+        ))
+        conn.commit()
+    return report_id
+
+def get_recent_reports(limit=20):
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT id, created_at, patient_name, age, gender, bmi,
+                   sa_risk_score, risk_category, patterns, approved
+            FROM reports
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, (limit,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ═══════════════════════════════════════════════════════════════════
 # ROUTES
 # ═══════════════════════════════════════════════════════════════════
 @app.route("/", methods=["GET", "POST"])
@@ -1054,7 +1139,9 @@ def labs():
             return render(RESULTS_HTML, result=er, report_draft="", approved=None)
 
         report_draft = call_claude(build_report_prompt(er))
-        sset("result", er); sset("report_draft", report_draft); spop("approved")
+        report_id = save_report(er, report_text=report_draft)
+        sset("result", er); sset("report_draft", report_draft)
+        sset("report_id", report_id); spop("approved")
         return render(RESULTS_HTML, result=er, report_draft=report_draft, approved=None)
 
     demo = request.args.get("demo") == "1"
@@ -1067,14 +1154,68 @@ def results():
     if not sget("result"):
         return redirect(url_for("intake"))
     if request.method == "POST":
-        sset("approved", {
+        approved_data = {
             "doctor": request.form.get("doctor_name", ""),
             "report": request.form.get("report_text", "")
-        })
+        }
+        sset("approved", approved_data)
+        # Update database with approved report
+        report_id = sget("report_id")
+        if report_id:
+            with get_db() as conn:
+                conn.execute("""
+                    UPDATE reports
+                    SET report_text=?, doctor_name=?, approved=1
+                    WHERE id=?
+                """, (approved_data["report"], approved_data["doctor"], report_id))
+                conn.commit()
     return render(RESULTS_HTML,
                   result=sget("result"),
                   report_draft=sget("report_draft", ""),
                   approved=sget("approved"))
+
+
+@app.route("/admin")
+def admin():
+    reports = get_recent_reports(50)
+    rows = ""
+    for r in reports:
+        patterns = ", ".join(json.loads(r["patterns"])) if r["patterns"] else "none"
+        approved = "✓" if r["approved"] else "pending"
+        rows += f"""
+        <tr>
+            <td>{r['created_at'][:10]}</td>
+            <td>{r['patient_name'] or '—'}</td>
+            <td>{r['age'] or '—'}</td>
+            <td>{r['gender'] or '—'}</td>
+            <td>{r['bmi'] or '—'}</td>
+            <td style="font-weight:600;color:{'#b91c1c' if (r['sa_risk_score'] or 0) >= 75 else '#92400e' if (r['sa_risk_score'] or 0) >= 50 else '#166534'}">{r['sa_risk_score']}</td>
+            <td>{r['risk_category'] or '—'}</td>
+            <td style="font-size:11px">{patterns}</td>
+            <td>{approved}</td>
+        </tr>"""
+    return f"""<!DOCTYPE html><html><head><title>Symbiosis — Admin</title>
+    <style>
+    body{{font-family:'DM Sans',sans-serif;padding:32px;background:#F7F5F2;color:#1a1a1a}}
+    h1{{font-size:20px;margin-bottom:8px}}
+    p{{font-size:13px;color:#6b7280;margin-bottom:24px}}
+    table{{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #E8E4DF}}
+    th{{font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.08em;padding:10px 14px;text-align:left;border-bottom:1px solid #E8E4DF}}
+    td{{font-size:13px;padding:10px 14px;border-bottom:1px solid #F3F0EC}}
+    tr:last-child td{{border-bottom:none}}
+    </style></head>
+    <body>
+    <h1>Symbiosis Health — Reports</h1>
+    <p>{len(reports)} reports total</p>
+    <table>
+    <tr>
+        <th>Date</th><th>Patient</th><th>Age</th><th>Gender</th>
+        <th>BMI</th><th>Score</th><th>Category</th><th>Patterns</th><th>Status</th>
+    </tr>
+    {rows if rows else '<tr><td colspan="9" style="text-align:center;color:#9ca3af;padding:24px">No reports yet</td></tr>'}
+    </table>
+    <br><a href="/" style="font-size:13px;color:#2D6A4F">← New patient</a>
+    </body></html>"""
 
 
 @app.route("/new")
@@ -1087,5 +1228,5 @@ def new_patient():
 # LAUNCH
 # ═══════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
+    port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
