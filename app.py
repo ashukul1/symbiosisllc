@@ -1175,15 +1175,11 @@ def labs():
 
 @app.route("/results", methods=["GET", "POST"])
 def results():
-    if not sget("result"):
-        return redirect(url_for("intake"))
+    # POST = doctor approval — handle without relying on session
     if request.method == "POST":
-        approved_data = {
-            "doctor": request.form.get("doctor_name", ""),
-            "report": request.form.get("report_text", "")
-        }
-        sset("approved", approved_data)
-        report_id = sget("report_id") or request.form.get("report_id", "")
+        report_id = request.form.get("report_id", "") or sget("report_id", "")
+        report_text = request.form.get("report_text", "")
+        doctor_name = request.form.get("doctor_name", "")
         if report_id:
             try:
                 conn = get_db()
@@ -1191,12 +1187,14 @@ def results():
                     UPDATE reports
                     SET report_text=:report_text, doctor_name=:doctor_name, approved=TRUE
                     WHERE id=:id
-                """, report_text=approved_data["report"], doctor_name=approved_data["doctor"], id=report_id)
+                """, report_text=report_text, doctor_name=doctor_name, id=report_id)
                 conn.close()
             except Exception as e:
                 print(f"Approval update error: {e}")
-        if report_id:
             return redirect(url_for("patient_report", report_id=report_id))
+        return redirect(url_for("intake"))
+    # GET = show doctor review page
+    if not sget("result"):
         return redirect(url_for("intake"))
     return render(RESULTS_HTML,
                   result=sget("result"),
