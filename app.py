@@ -1310,6 +1310,120 @@ def results(report_id):
                   report_id=report_id)
 
 
+
+
+@app.route("/report/<report_id>")
+def patient_report(report_id):
+    try:
+        conn = get_db()
+        rows = conn.run("SELECT * FROM reports WHERE id=:id", id=report_id)
+        cols = [c["name"] for c in conn.columns]
+        conn.close()
+        if not rows:
+            return redirect(url_for("intake"))
+        row = dict(zip(cols, rows[0]))
+    except Exception as e:
+        print(f"Patient report error: {e}")
+        return redirect(url_for("intake"))
+
+    lab_values = json.loads(row.get("lab_values", "{}"))
+    patterns_raw = json.loads(row.get("patterns", "[]"))
+
+    high_markers, borderline_markers = [], []
+    for key, value in lab_values.items():
+        if key in MARKERS and value is not None:
+            defn = MARKERS[key]
+            status = _score_marker(value, defn)
+            entry = {"name": defn["name"], "value": value, "unit": defn["unit"]}
+            if status == "high":
+                high_markers.append(entry)
+            elif status == "borderline":
+                borderline_markers.append(entry)
+
+    # Domain bars
+    domain_bars = []
+    for dk, ddef in DOMAINS.items():
+        dm = [(k,v) for k,v in lab_values.items() if k in MARKERS and MARKERS[k]["domain"]==dk and v is not None]
+        if dm:
+            scored = [_score_marker(v, MARKERS[k]) for k,v in dm]
+            raw = sum(2 if s=="high" else 1 if s=="borderline" else 0 for s in scored)
+            mx = len(scored) * 2
+            pct = round((raw/mx)*100) if mx else 0
+            domain_bars.append({"label": ddef["label"], "pct": pct})
+
+    # Patterns
+    pattern_names = {
+        "ir": "Insulin Resistance Cluster",
+        "cvd": "Cardiovascular Risk Cluster",
+        "b12": "B12-Folate-Homocysteine Alert",
+        "nafld": "SA Lean NAFLD Pattern",
+        "thyroid": "Thyroid-Metabolic Pattern",
+        "anaemia": "Nutritional Anaemia Pattern",
+        "kidney": "Early Kidney Stress Pattern",
+    }
+    patterns = [{"name": pattern_names.get(p, p), "severity": "high", "evidence": ""} for p in patterns_raw]
+
+    cat = row.get("risk_category", "moderate")
+    score = row.get("sa_risk_score", 0)
+    cat_label = {"low": "Low risk", "moderate": "Moderate risk", "high": "High risk", "very_high": "Very high risk"}.get(cat, "")
+
+    report_text = row.get("report_text", "")
+
+    # Parse recommendations
+    recommendations = []
+    section_map = {"Food": "Food", "Movement": "Movement", "Supplements": "Supplements", "Who to see": "Who to see"}
+    current_section, current_items = None, []
+    for line in report_text.split("\n"):
+        line = line.strip()
+        for key, label in section_map.items():
+            if key in line and "###" in line:
+                if current_section and current_items:
+                    recommendations.append({"title": current_section, "items": current_items})
+                current_section = label
+                current_items = []
+                break
+        else:
+            if current_section and line and not line.startswith("#") and len(line) > 20:
+                line = line.lstrip("- •*").strip()
+                if line:
+                    current_items.append(line)
+    if current_section and current_items:
+        recommendations.append({"title": current_section, "items": current_items})
+
+    # Summary paragraphs
+    summary_paras = []
+    for line in report_text.split("\n"):
+        line = line.strip()
+        if line.startswith("###"):
+            break
+        if line.startswith("##"):
+            continue
+        if line and len(line) > 30:
+            summary_paras.append(line)
+
+    optimal_count = sum(
+        1 for k,v in lab_values.items()
+        if k in MARKERS and v is not None and _score_marker(v, MARKERS[k]) == "optimal"
+    )
+
+    return render(PATIENT_REPORT_HTML,
+        patient_name=row.get("patient_name", "Patient"),
+        doctor_name=row.get("doctor_name", "Symbiosis Health"),
+        sa_risk_score=score,
+        risk_category=cat,
+        risk_category_label=cat_label,
+        high_count=len(high_markers),
+        borderline_count=len(borderline_markers),
+        optimal_count=optimal_count,
+        domain_bars=domain_bars,
+        high_markers=high_markers,
+        borderline_markers=borderline_markers,
+        patterns=patterns,
+        recommendations=recommendations,
+        summary_paras=summary_paras[:4],
+        report_id=report_id,
+    )
+
 @app.route("/new")
 def new_patient():
     return redirect(url_for("intake"))
