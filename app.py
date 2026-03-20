@@ -1,39 +1,44 @@
-import os, requests, uuid, sqlite3, json
+import os, requests, uuid, json
 from datetime import datetime
 from flask import Flask, request, redirect, url_for, session
 from jinja2 import Environment
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 # ═══════════════════════════════════════════════════════════════════
 # DATABASE
 # ═══════════════════════════════════════════════════════════════════
-DB_PATH = os.environ.get("DB_PATH", "symbiosis.db")
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
     return conn
 
 def init_db():
-    with get_db() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS reports (
-                id          TEXT PRIMARY KEY,
-                created_at  TEXT NOT NULL,
-                patient_name TEXT,
-                age         INTEGER,
-                gender      TEXT,
-                bmi         REAL,
-                vegetarian  INTEGER,
-                sa_risk_score INTEGER,
-                risk_category TEXT,
-                patterns    TEXT,
-                lab_values  TEXT,
-                report_text TEXT,
-                doctor_name TEXT,
-                approved    INTEGER DEFAULT 0
-            )
-        """)
-        conn.commit()
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS reports (
+                        id          TEXT PRIMARY KEY,
+                        created_at  TEXT NOT NULL,
+                        patient_name TEXT,
+                        age         INTEGER,
+                        gender      TEXT,
+                        bmi         REAL,
+                        vegetarian  BOOLEAN,
+                        sa_risk_score INTEGER,
+                        risk_category TEXT,
+                        patterns    TEXT,
+                        lab_values  TEXT,
+                        report_text TEXT,
+                        doctor_name TEXT,
+                        approved    BOOLEAN DEFAULT FALSE
+                    )
+                """)
+            conn.commit()
+    except Exception as e:
+        print(f"DB init error: {e}")
 
 init_db()
 
@@ -764,7 +769,7 @@ def call_claude(prompt, max_tokens=3000):
                 "max_tokens": max_tokens,
                 "messages": [{"role": "user", "content": prompt}]
             },
-            timeout=120
+            timeout=115
         )
         data = r.json()
         if "error" in data:
@@ -1050,42 +1055,52 @@ def save_report(er, report_text="", doctor_name="", approved=False):
         for m in er.get("markerResults", {}).values()
         if m.get("value") is not None
     })
-    with get_db() as conn:
-        conn.execute("""
-            INSERT INTO reports
-            (id, created_at, patient_name, age, gender, bmi, vegetarian,
-             sa_risk_score, risk_category, patterns, lab_values,
-             report_text, doctor_name, approved)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (
-            report_id,
-            datetime.utcnow().isoformat(),
-            patient.get("name", ""),
-            patient.get("age"),
-            patient.get("gender"),
-            patient.get("bmi"),
-            1 if patient.get("vegetarian") else 0,
-            er.get("saRiskScore"),
-            er.get("riskCategory"),
-            patterns,
-            lab_values,
-            report_text,
-            doctor_name,
-            1 if approved else 0
-        ))
-        conn.commit()
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO reports
+                    (id, created_at, patient_name, age, gender, bmi, vegetarian,
+                     sa_risk_score, risk_category, patterns, lab_values,
+                     report_text, doctor_name, approved)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """, (
+                    report_id,
+                    datetime.utcnow().isoformat(),
+                    patient.get("name", ""),
+                    patient.get("age"),
+                    patient.get("gender"),
+                    patient.get("bmi"),
+                    patient.get("vegetarian", False),
+                    er.get("saRiskScore"),
+                    er.get("riskCategory"),
+                    patterns,
+                    lab_values,
+                    report_text,
+                    doctor_name,
+                    approved
+                ))
+            conn.commit()
+    except Exception as e:
+        print(f"Save report error: {e}")
     return report_id
 
 def get_recent_reports(limit=20):
-    with get_db() as conn:
-        rows = conn.execute("""
-            SELECT id, created_at, patient_name, age, gender, bmi,
-                   sa_risk_score, risk_category, patterns, approved
-            FROM reports
-            ORDER BY created_at DESC
-            LIMIT ?
-        """, (limit,)).fetchall()
-    return [dict(r) for r in rows]
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id, created_at, patient_name, age, gender, bmi,
+                           sa_risk_score, risk_category, patterns, approved
+                    FROM reports
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                """, (limit,))
+                rows = cur.fetchall()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        print(f"Get reports error: {e}")
+        return []
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1162,13 +1177,17 @@ def results():
         # Update database with approved report
         report_id = sget("report_id")
         if report_id:
-            with get_db() as conn:
-                conn.execute("""
-                    UPDATE reports
-                    SET report_text=?, doctor_name=?, approved=1
-                    WHERE id=?
-                """, (approved_data["report"], approved_data["doctor"], report_id))
-                conn.commit()
+            try:
+                with get_db() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            UPDATE reports
+                            SET report_text=%s, doctor_name=%s, approved=TRUE
+                            WHERE id=%s
+                        """, (approved_data["report"], approved_data["doctor"], report_id))
+                    conn.commit()
+            except Exception as e:
+                print(f"Approval update error: {e}")
     return render(RESULTS_HTML,
                   result=sget("result"),
                   report_draft=sget("report_draft", ""),
