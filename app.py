@@ -1961,6 +1961,69 @@ def patient_report(report_id):
         report_id=report_id,
     )
 
+
+@app.route("/admin")
+def admin():
+    reports = get_recent_reports(50)
+    waitlist_emails = []
+    try:
+        conn = get_db()
+        rows_w = conn.run("SELECT email, created_at FROM waitlist ORDER BY created_at DESC LIMIT 100")
+        cols_w = [c["name"] for c in conn.columns]
+        conn.close()
+        waitlist_emails = [dict(zip(cols_w, r)) for r in rows_w]
+    except Exception as e:
+        print(f"Waitlist fetch error: {e}")
+
+    report_rows = ""
+    for r in reports:
+        patterns = ", ".join(json.loads(r["patterns"])) if r.get("patterns") else "none"
+        approved = "✓" if r["approved"] else "pending"
+        score = r.get("sa_risk_score", 0) or 0
+        col = "#b91c1c" if score >= 75 else "#92400e" if score >= 50 else "#166534"
+        report_rows += f"""<tr>
+            <td>{r['created_at'][:10]}</td>
+            <td>{r.get('patient_name') or '—'}</td>
+            <td>{r.get('age') or '—'}</td>
+            <td>{r.get('gender') or '—'}</td>
+            <td>{r.get('bmi') or '—'}</td>
+            <td style="font-weight:600;color:{col}">{score}</td>
+            <td>{r.get('risk_category') or '—'}</td>
+            <td style="font-size:11px">{patterns}</td>
+            <td><a href="/report/{r['id']}" style="color:#2D6A4F">{approved}</a></td>
+        </tr>"""
+
+    waitlist_rows = ""
+    for w in waitlist_emails:
+        waitlist_rows += f"<tr><td>{w['created_at'][:10]}</td><td>{w['email']}</td></tr>"
+
+    return f"""<!DOCTYPE html><html><head><title>Symbiosis Admin</title>
+    <style>
+    body{{font-family:'DM Sans',sans-serif;padding:32px;background:#F7F5F2;color:#1a1a1a}}
+    h1{{font-size:20px;margin-bottom:4px}}
+    h2{{font-size:15px;margin:28px 0 10px;color:#1a1a1a}}
+    table{{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #E8E4DF;margin-bottom:8px}}
+    th{{font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.08em;padding:10px 14px;text-align:left;border-bottom:1px solid #E8E4DF;background:#fafaf9}}
+    td{{font-size:13px;padding:10px 14px;border-bottom:1px solid #F3F0EC}}
+    tr:last-child td{{border-bottom:none}}
+    .badge{{background:#F0F7F4;color:#2D6A4F;font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;margin-left:8px}}
+    </style></head>
+    <body>
+    <h1>Symbiosis Health — Admin</h1>
+    <h2>Waitlist <span class="badge">{len(waitlist_emails)} signups</span></h2>
+    <table><tr><th>Date</th><th>Email</th></tr>
+    {waitlist_rows or '<tr><td colspan="2" style="text-align:center;color:#9ca3af;padding:20px">No signups yet</td></tr>'}
+    </table>
+    <h2>Reports <span class="badge">{len(reports)} total</span></h2>
+    <table><tr>
+        <th>Date</th><th>Patient</th><th>Age</th><th>Gender</th>
+        <th>BMI</th><th>Score</th><th>Category</th><th>Patterns</th><th>Status</th>
+    </tr>
+    {report_rows or '<tr><td colspan="9" style="text-align:center;color:#9ca3af;padding:20px">No reports yet</td></tr>'}
+    </table>
+    <br><a href="/start" style="font-size:13px;color:#2D6A4F">← New patient</a>
+    </body></html>"""
+
 @app.route("/new")
 def new_patient():
     return redirect(url_for("intake"))
