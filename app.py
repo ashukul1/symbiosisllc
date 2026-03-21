@@ -1138,7 +1138,7 @@ def get_recent_reports(limit=20):
 # ═══════════════════════════════════════════════════════════════════
 # ROUTES
 
-@app.route("/")
+@app.route("/", methods=["GET", "POST"])
 @app.route("/start", methods=["GET", "POST"])
 def intake():
     if request.method == "POST":
