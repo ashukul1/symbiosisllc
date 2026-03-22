@@ -767,6 +767,13 @@ def build_report_prompt(er):
     anaemia_pat   = any(pt["id"] == "anaemia" for pt in pats)
     kidney_pat    = any(pt["id"] == "kidney"  for pt in pats)
 
+    # Compute biological age for prompt context
+    from collections import defaultdict
+    lab_vals_for_bio = {m["key"]: m["value"] for m in high + bord if m.get("value") is not None}
+    bio = compute_biological_age(p.get("age", 30), lab_vals_for_bio, p.get("gender", "female"))
+    bio_age_str = f"Biological age: {bio['biological_age']} (chronological: {bio['chronological_age']}, delta: +{bio['delta']} years)"
+    bio_sub_str = f"Metabolic age: {bio['sub_ages']['metabolic']} | Heart age: {bio['sub_ages']['heart']} | Inflammation age: {bio['sub_ages']['inflammation']}"
+
     return f"""HARD CONSTRAINTS — NEVER VIOLATE:
 1. Never state or imply a specific diagnosis
 2. Never predict a specific clinical outcome or probability
@@ -791,6 +798,8 @@ Family history of heart disease: {'Yes' if p.get('family_cvd_before_60') else 'N
 Family history of diabetes: {'Yes' if p.get('family_diabetes') else 'No'}
 
 RESULTS
+{bio_age_str}
+{bio_sub_str}
 SA Risk Score: {score}/100 ({cat})
 Domain scores:
 {domain_lines}
@@ -814,69 +823,40 @@ CLINICAL CONTEXT
 {'NUTRITIONAL ANAEMIA: Haemoglobin flagged alongside iron or B12 markers.' if anaemia_pat else ''}
 {'EARLY KIDNEY STRESS: Time to intervene now before eGFR falls further.' if kidney_pat else ''}
 
-Write exactly these five sections. No bullet points anywhere — warm conversational paragraphs throughout.
+Write exactly these four sections. Keep it concise and action-focused — this feeds into a visual dashboard.
 
-## Here's what we found
-2–3 sentences giving the honest headline. Reference their SA Risk Score. Direct but not alarming.
-
-Then one paragraph per flagged domain only. For each: what it does in the body, what the specific numbers mean (use actual values), why it matters for South Asians.
-{'Add a paragraph titled "What caught our attention" connecting these patterns as a story: ' + ', '.join(pt['name'] for pt in pats) + '.' if pats else ''}
-{'When discussing Lp(a): be clear it is genetic and not their fault — and not changeable through lifestyle.' if lpa_high else ''}
-
-## What this means for your body right now
-2–3 paragraphs translating results into lived experience. Connect numbers to symptoms they may recognise — energy, sleep, after-meal feelings, brain fog, weight around the middle.
-{'Explain insulin resistance as the body working overtime to manage blood sugar — like an engine running too hard. Highly reversible at this stage.' if ir_pattern else ''}
-{'Explain B12 deficiency often shows as fatigue, brain fog, tingling in hands or feet.' if b12_pattern else ''}
-End with something genuinely positive from their results or acknowledge the courage it takes to look at this data proactively.
-
-## Your personalised action plan
+## What's aging you faster
+2-3 sentences only. Tell them their biological age is older than their chronological age and what's primarily driving it. Reference the top 1-2 flagged patterns. Warm and direct — not alarming.
+{'When discussing Lp(a): be clear it is genetic — not their fault and not changeable through lifestyle.' if lpa_high else ''}
 
 ### Food
-{'This patient is vegetarian. Every recommendation must be vegetarian. No meat, poultry, or fish.' if veg else ''}
-Be specific to South Asian eating patterns. Name actual foods.
-Address: white rice portions, roti (maida vs atta vs sourdough), dal frequency, chai sugar, cooking oils (ghee fine in moderation, avoid seed oils), breakfast skipping, late dinners.
-{'Protein sources: moong dal, masoor dal, chana, paneer in moderation, Greek yoghurt, tofu, hemp seeds, edamame.' if veg else ''}
-Give 3–5 specific food swaps based on the actual flagged markers.
+Frame every recommendation as: "to reduce your biological age, change X."
+{'This patient is vegetarian. Every recommendation must be vegetarian — no meat, fish or poultry.' if veg else ''}
+Be specific to South Asian eating. Name actual foods. Address white rice, roti, dal, chai sugar, cooking oils, late dinners.
+3-5 bullet points maximum. Each one tied directly to a flagged marker.
 
 ### Movement
-Do not assume gym access. Home-based options only.
-Lead with:
-1. Post-meal walks: 10 minutes after every meal reduces postprandial glucose by up to 30% in South Asians.
-2. Resistance training: muscle is the primary site of glucose disposal. 3x per week bodyweight — squats, lunges, push-ups.
-{'Emphasise resistance training urgency — confirmed insulin resistance cluster.' if ir_pattern else ''}
-{'Zone 2 cardio 30 mins 4x per week directly reduces ApoB and triglycerides.' if cvd_pattern else ''}
+Frame as: "these changes will directly lower your biological age."
+Home-based only. No gym assumed.
+Lead with post-meal walks (10 min reduces postprandial glucose 30% in SA) and resistance training (muscle is primary glucose disposal site).
+{'Emphasise urgency — confirmed insulin resistance cluster.' if ir_pattern else ''}
+3-4 bullet points maximum.
 
 ### Supplements
-Only what the evidence supports for this patient's specific flagged markers.
-Format each as: name — dose — when to take — why for this patient specifically.
-{'Specify methylcobalamin (not cyanocobalamin) for B12, algae-based omega-3, vitamin D3 from lichen.' if veg else ''}
-{'- Methylcobalamin B12: 1000mcg daily with morning meal — urgent, no dietary source as vegetarian' if (b12_pattern or any(m["key"]=="vitaminB12" for m in high+bord)) else ''}
-{'- Methylfolate: 400mcg daily — supports homocysteine clearance' if (b12_pattern or any(m["key"]=="folate" for m in high+bord)) else ''}
-{'- Vitamin D3: 2000–4000 IU daily with fattiest meal' if any(m["key"]=="vitaminD" for m in high+bord) else ''}
-{'- Magnesium glycinate: 300mg before bed — supports insulin sensitivity and sleep' if any(m["key"]=="magnesium" for m in high+bord) else ''}
-End with: "Your Symbiosis doctor will review these and advise on whether any prescription-level interventions are appropriate."
+Only what evidence supports for their specific flagged markers.
+Format: supplement — dose — why it lowers your biological age specifically.
+{'Use methylcobalamin not cyanocobalamin. Algae-based omega-3. Lichen-based D3.' if veg else ''}
+3-5 bullet points maximum.
 
 ### Who to see
-{'- Cardiologist: review Lp(a) and CVD risk profile' if (lpa_high or cvd_pattern) else ''}
-{'- Endocrinologist or metabolic physician: insulin resistance cluster review, request glucose tolerance test' if ir_pattern else ''}
-{'- Hepatologist: if liver enzymes do not improve within 12 weeks of lifestyle changes' if nafld_pattern else ''}
+One line per specialist. Only include what's relevant to their flagged patterns.
+{'- Cardiologist: Lp(a) and CVD risk' if (lpa_high or cvd_pattern) else ''}
+{'- Endocrinologist: insulin resistance cluster' if ir_pattern else ''}
+{'- Hepatologist: if liver enzymes persist after 12 weeks' if nafld_pattern else ''}
 {'- GP: thyroid panel review' if thyroid_pat else ''}
-{'- Nephrologist: repeat eGFR and ACR in 3 months' if kidney_pat else ''}
-State what follow-up bloods to repeat and when — metabolic markers at 3 months, everything else at 6 months.
+{'- Nephrologist: repeat eGFR in 3 months' if kidney_pat else ''}
 
-## Your three focuses for the next 30 days
-Exactly three, ranked by clinical impact for this specific patient.
-
-Format each as:
-Focus [N]: [Short name]
-What to do: [One specific concrete action]
-Why it matters for you: [One sentence linking to their actual flagged markers]
-What to expect: [Measurable change in 4–8 weeks]
-
-## Closing
-One short paragraph. Acknowledge that seeing results like these can feel overwhelming. Remind them that looking at this data and acting on it puts them ahead of almost everyone. Be genuine and warm.
-
-STYLE: No bullet points — paragraphs only except the three focuses. Second person throughout. Warm, direct, intelligent. Name actual SA foods. Reference actual numbers. Never diagnose. Never name prescription drugs."""
+STYLE: Second person throughout. Warm, direct, intelligent. Every recommendation tied to biological age reduction. Name actual SA foods. Reference actual numbers. Never diagnose. Never name prescription drugs."""
 
 
 def call_claude(prompt, max_tokens=3000):
