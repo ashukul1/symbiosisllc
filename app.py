@@ -645,97 +645,192 @@ def run_engine(patient, lab_results):
 
 
 # ═══════════════════════════════════════════════════════════════════
-# BIOLOGICAL AGE ENGINE — SA-specific weights
+# BIOLOGICAL AGE ENGINE — SA-calibrated (v2)
 # ═══════════════════════════════════════════════════════════════════
-BIO_AGE_WEIGHTS = {
-    # Metabolic domain — highest impact for SA
-    "hba1c":         {"optimal_max": 5.4, "moderate_add": 3, "high_add": 6,  "domain": "metabolic",     "label": "HbA1c",          "gain_text": "Bring HbA1c below 5.4%"},
-    "fastingInsulin":{"optimal_max": 8,   "moderate_add": 3, "high_add": 6,  "domain": "metabolic",     "label": "Fasting Insulin", "gain_text": "Lower fasting insulin below 8"},
-    "fastingGlucose":{"optimal_max": 90,  "moderate_add": 2, "high_add": 4,  "domain": "metabolic",     "label": "Fasting Glucose", "gain_text": "Bring fasting glucose below 90"},
-    "homaIr":        {"optimal_max": 1.5, "moderate_add": 2, "high_add": 5,  "domain": "metabolic",     "label": "HOMA-IR",         "gain_text": "Reduce insulin resistance (HOMA-IR)"},
-    "lpir":          {"optimal_max": 45,  "moderate_add": 3, "high_add": 7,  "domain": "metabolic",     "label": "LP-IR Score",     "gain_text": "Improve LP-IR score below 45"},
-    "tgHdlRatio":    {"optimal_max": 2.0, "moderate_add": 2, "high_add": 4,  "domain": "metabolic",     "label": "TG/HDL Ratio",    "gain_text": "Improve TG/HDL ratio below 2.0"},
-    # Cardiovascular domain
-    "hsCrp":         {"optimal_max": 1.0, "moderate_add": 2, "high_add": 5,  "domain": "heart",         "label": "hs-CRP",          "gain_text": "Reduce inflammation (hs-CRP below 1.0)"},
-    "apob":          {"optimal_max": 80,  "moderate_add": 2, "high_add": 4,  "domain": "heart",         "label": "ApoB",            "gain_text": "Lower ApoB below 80 mg/dL"},
-    "lpa":           {"optimal_max": 30,  "moderate_add": 1, "high_add": 3,  "domain": "heart",         "label": "Lp(a)",           "gain_text": "Lp(a) is genetic — manage other CV factors"},
-    "homocysteine":  {"optimal_max": 8,   "moderate_add": 2, "high_add": 4,  "domain": "heart",         "label": "Homocysteine",    "gain_text": "Lower homocysteine below 8 µmol/L"},
-    "triglycerides": {"optimal_max": 100, "moderate_add": 1, "high_add": 3,  "domain": "heart",         "label": "Triglycerides",   "gain_text": "Bring triglycerides below 100 mg/dL"},
-    "hdl":           {"optimal_min": 50,  "moderate_add": 1, "high_add": 3,  "domain": "heart",         "label": "HDL",             "gain_text": "Raise HDL above 50 mg/dL"},
-    # Inflammation / nutritional
-    "vitaminD":      {"optimal_min": 40,  "moderate_add": 1, "high_add": 2,  "domain": "inflammation",  "label": "Vitamin D",       "gain_text": "Optimise Vitamin D above 40 ng/mL"},
-    "vitaminB12":    {"optimal_min": 400, "moderate_add": 1, "high_add": 2,  "domain": "inflammation",  "label": "Vitamin B12",     "gain_text": "Optimise B12 above 400 pg/mL"},
-    "alt":           {"optimal_max": 25,  "moderate_add": 1, "high_add": 3,  "domain": "inflammation",  "label": "ALT",             "gain_text": "Reduce liver stress (ALT below 25)"},
+from dataclasses import dataclass
+from typing import Optional
+
+@dataclass
+class BioMarker:
+    key: str
+    name: str
+    unit: str
+    weight: int
+    domain: str
+
+    def is_optimal(self, v: float) -> bool:   return False
+    def is_high_risk(self, v: float) -> bool: return False
+
+    def status(self, v: float) -> str:
+        if self.is_optimal(v):   return "optimal"
+        if self.is_high_risk(v): return "high_risk"
+        return "borderline"
+
+    def score(self, v: float) -> int:
+        s = self.status(v)
+        if s == "optimal":    return 0
+        if s == "borderline": return 1 * self.weight
+        if s == "high_risk":  return 2 * self.weight
+        return 0
+
+    def max_score(self) -> int:
+        return 2 * self.weight
+
+def _bm(key, name, unit, weight, domain, optimal_fn, high_risk_fn):
+    m = BioMarker(key=key, name=name, unit=unit, weight=weight, domain=domain)
+    m.is_optimal   = lambda v, f=optimal_fn:   f(v)
+    m.is_high_risk = lambda v, f=high_risk_fn: f(v)
+    return m
+
+BIO_MARKERS = [
+    # CVD
+    _bm("lpa",            "Lipoprotein(a)",      "nmol/L", 3, "cvd",    lambda v: v < 30,            lambda v: v > 75),
+    _bm("apob",           "ApoB",                "mg/dL",  3, "cvd",    lambda v: v < 80,            lambda v: v > 100),
+    _bm("apoa1",          "ApoA1",               "mg/dL",  3, "cvd",    lambda v: v > 120,           lambda v: v < 100),
+    _bm("ldl",            "LDL Cholesterol",     "mg/dL",  2, "cvd",    lambda v: v < 100,           lambda v: v >= 130),
+    _bm("hdl",            "HDL Cholesterol",     "mg/dL",  2, "cvd",    lambda v: v > 50,            lambda v: v < 40),
+    _bm("triglycerides",  "Triglycerides",       "mg/dL",  2, "cvd",    lambda v: v < 100,           lambda v: v > 150),
+    _bm("totalCholesterol","Total Cholesterol",  "mg/dL",  1, "cvd",    lambda v: v < 200,           lambda v: v >= 240),
+    _bm("nonHdl",         "Non-HDL Cholesterol", "mg/dL",  2, "cvd",    lambda v: v < 130,           lambda v: v >= 160),
+    _bm("hsCrp",          "hs-CRP",              "mg/L",   3, "cvd",    lambda v: v < 1.0,           lambda v: v > 2.0),
+    _bm("homocysteine",   "Homocysteine",        "µmol/L", 3, "cvd",    lambda v: v < 8,             lambda v: v > 12),
+    # Metabolic
+    _bm("lpir",           "LP-IR Score",         "0-100",  3, "metabolic", lambda v: v < 45,         lambda v: v > 60),
+    _bm("fastingInsulin", "Fasting Insulin",     "µIU/mL", 3, "metabolic", lambda v: v < 8,          lambda v: v > 12),
+    _bm("hba1c",          "HbA1c",               "%",      3, "metabolic", lambda v: v < 5.4,        lambda v: v > 5.7),
+    _bm("fastingGlucose", "Fasting Glucose",     "mg/dL",  2, "metabolic", lambda v: v < 90,         lambda v: v >= 100),
+    _bm("homaIr",         "HOMA-IR",             "ratio",  2, "metabolic", lambda v: v < 1.5,        lambda v: v >= 2.5),
+    _bm("uricAcid",       "Uric Acid",           "mg/dL",  2, "metabolic", lambda v: v < 6.0,        lambda v: v > 7.0),
+    _bm("cPeptide",       "C-Peptide",           "ng/mL",  2, "metabolic", lambda v: 0.5<=v<=2.0,    lambda v: v > 3.0 or v < 0.5),
+    _bm("tgHdlRatio",     "TG/HDL Ratio",        "ratio",  2, "metabolic", lambda v: v < 2.0,        lambda v: v > 3.0),
+    # Liver & Kidney
+    _bm("alt",            "ALT",                 "U/L",    3, "liver",  lambda v: v < 25,            lambda v: v > 40),
+    _bm("ast",            "AST",                 "U/L",    2, "liver",  lambda v: v < 25,            lambda v: v > 40),
+    _bm("ggt",            "GGT",                 "U/L",    2, "liver",  lambda v: v < 30,            lambda v: v > 50),
+    _bm("creatinine",     "Creatinine",          "mg/dL",  2, "liver",  lambda v: 0.6<=v<=1.0,       lambda v: v > 1.2),
+    _bm("egfr",           "eGFR",                "mL/min", 3, "liver",  lambda v: v > 90,            lambda v: v < 60),
+    _bm("albumin",        "Albumin",             "g/dL",   2, "liver",  lambda v: 4.0<=v<=5.0,       lambda v: v < 3.5),
+    _bm("urineAcr",       "Urine ACR",           "mg/g",   3, "liver",  lambda v: v < 10,            lambda v: v > 30),
+    # Thyroid
+    _bm("tsh",            "TSH",                 "mIU/L",  3, "thyroid",lambda v: 1.0<=v<=2.5,       lambda v: v >= 4.0 or v < 1.0),
+    _bm("freeT3",         "Free T3",             "pg/mL",  2, "thyroid",lambda v: 3.0<=v<=4.2,       lambda v: v < 2.3),
+    _bm("freeT4",         "Free T4",             "ng/dL",  2, "thyroid",lambda v: 1.0<=v<=1.6,       lambda v: v < 0.8),
+    # Nutritional
+    _bm("vitaminD",       "Vitamin D",           "ng/mL",  3, "nutritional", lambda v: v >= 40,      lambda v: v < 30),
+    _bm("vitaminB12",     "Vitamin B12",         "pg/mL",  3, "nutritional", lambda v: v >= 400,     lambda v: v < 200),
+    _bm("folate",         "Folate",              "ng/mL",  2, "nutritional", lambda v: v > 4.0,      lambda v: v < 2.0),
+    _bm("ferritin",       "Ferritin",            "ng/mL",  2, "nutritional", lambda v: 50<=v<=150,   lambda v: v < 20 or v > 200),
+    _bm("iron",           "Iron",                "µg/dL",  1, "nutritional", lambda v: 60<=v<=170,   lambda v: v < 40),
+    _bm("magnesium",      "Magnesium",           "mg/dL",  2, "nutritional", lambda v: 2.0<=v<=2.5,  lambda v: v < 1.7),
+    _bm("zinc",           "Zinc",                "µg/dL",  1, "nutritional", lambda v: v >= 80,      lambda v: v < 60),
+    # Blood
+    _bm("hemoglobin",     "Hemoglobin",          "g/dL",   2, "blood",  lambda v: v >= 13.0,         lambda v: v < 11.0),
+    _bm("hematocrit",     "Hematocrit",          "%",      1, "blood",  lambda v: v > 40,            lambda v: v < 36),
+    _bm("wbc",            "WBC",                 "×10³/µL",1, "blood",  lambda v: 4.0<=v<=10.5,      lambda v: v < 3.0 or v > 11.0),
+    _bm("platelets",      "Platelets",           "×10³/µL",1, "blood",  lambda v: 150<=v<=400,       lambda v: v < 100),
+    _bm("esr",            "ESR",                 "mm/hr",  2, "blood",  lambda v: v < 20,            lambda v: v > 40),
+]
+
+BIO_MARKER_MAP = {m.key: m for m in BIO_MARKERS}
+
+BIO_DOMAINS = {
+    "cvd":         {"weight": 0.30, "label": "Heart",        "base_offset": -8,  "max_penalty": 24},
+    "metabolic":   {"weight": 0.28, "label": "Metabolic",    "base_offset": -6,  "max_penalty": 20},
+    "liver":       {"weight": 0.18, "label": "Liver & Kidney","base_offset": -4, "max_penalty": 14},
+    "thyroid":     {"weight": 0.10, "label": "Thyroid",      "base_offset": -3,  "max_penalty": 10},
+    "nutritional": {"weight": 0.08, "label": "Nutritional",  "base_offset": -3,  "max_penalty": 10},
+    "blood":       {"weight": 0.06, "label": "Blood",        "base_offset": -2,  "max_penalty": 8},
 }
 
-DOMAIN_WEIGHTS = {
-    "metabolic":    0.45,
-    "heart":        0.35,
-    "inflammation": 0.20,
-}
+def _interpret_delta(delta):
+    if delta is None:  return "Insufficient data"
+    if delta <= -5:    return "Excellent — well below your chronological age"
+    if delta <= 0:     return "Good — at or below your chronological age"
+    if delta <= 5:     return "Moderate — some areas need attention"
+    if delta <= 10:    return "Elevated — meaningful biological ageing acceleration"
+    return "High — significant biological ageing acceleration"
 
-def compute_biological_age(chronological_age, lab_values, gender):
-    results = []
-    domain_totals = {"metabolic": 0, "heart": 0, "inflammation": 0}
-    domain_counts = {"metabolic": 0, "heart": 0, "inflammation": 0}
-
-    for key, cfg in BIO_AGE_WEIGHTS.items():
-        value = lab_values.get(key)
-        if value is None:
+def compute_biological_age(chronological_age, lab_values, gender="female"):
+    chron = chronological_age
+    marker_details = {}
+    for key, value in lab_values.items():
+        if key not in BIO_MARKER_MAP or value is None:
             continue
+        m = BIO_MARKER_MAP[key]
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            continue
+        marker_details[key] = {
+            "name": m.name, "value": v, "unit": m.unit,
+            "status": m.status(v), "score": m.score(v),
+            "max_score": m.max_score(), "weight": m.weight, "domain": m.domain,
+        }
 
-        age_add = 0
-        # Higher is worse markers
-        if "optimal_max" in cfg:
-            if value > cfg["optimal_max"] * 1.15:
-                age_add = cfg["high_add"]
-            elif value > cfg["optimal_max"]:
-                age_add = cfg["moderate_add"]
-        # Lower is worse markers
-        elif "optimal_min" in cfg:
-            if value < cfg["optimal_min"] * 0.75:
-                age_add = cfg["high_add"]
-            elif value < cfg["optimal_min"]:
-                age_add = cfg["moderate_add"]
+    domain_scores = {}
+    for domain_id, cfg in BIO_DOMAINS.items():
+        domain_markers = [m for m in BIO_MARKERS if m.domain == domain_id]
+        entered = [m for m in domain_markers if m.key in marker_details]
+        if not entered:
+            domain_scores[domain_id] = {"domain_age": None, "label": cfg["label"],
+                                         "markers_entered": 0, "markers_total": len(domain_markers),
+                                         "penalty_ratio": None}
+            continue
+        total_score = sum(marker_details[m.key]["score"] for m in entered)
+        total_max   = sum(marker_details[m.key]["max_score"] for m in entered)
+        penalty_ratio = total_score / total_max if total_max > 0 else 0.0
+        domain_age = round(chron + cfg["base_offset"] + penalty_ratio * cfg["max_penalty"])
+        domain_scores[domain_id] = {
+            "domain_age": domain_age, "label": cfg["label"],
+            "markers_entered": len(entered), "markers_total": len(domain_markers),
+            "penalty_ratio": round(penalty_ratio, 3),
+        }
 
-        domain = cfg["domain"]
-        domain_totals[domain] += age_add
-        domain_counts[domain] += 1
+    weighted_sum = weighted_total = 0.0
+    for domain_id, cfg in BIO_DOMAINS.items():
+        d = domain_scores[domain_id]
+        if d["domain_age"] is not None:
+            weighted_sum   += d["domain_age"] * cfg["weight"]
+            weighted_total += cfg["weight"]
 
-        if age_add > 0:
-            results.append({
-                "key": key,
-                "label": cfg["label"],
-                "age_add": age_add,
-                "gain_text": cfg["gain_text"],
-                "domain": domain,
-            })
+    biological_age = round(weighted_sum / weighted_total) if weighted_total > 0 else chron
+    delta = biological_age - chron
 
-    # Domain sub-ages
-    sub_ages = {}
-    for domain in ["metabolic", "heart", "inflammation"]:
-        sub_ages[domain] = round(chronological_age + domain_totals[domain])
-
-    # Weighted biological age
-    total_add = sum(
-        domain_totals[d] * DOMAIN_WEIGHTS[d]
-        for d in DOMAIN_WEIGHTS
-    )
-    biological_age = round(chronological_age + total_add)
-
-    # Age delta
-    delta = biological_age - chronological_age
-
-    # Top gains — sorted by impact
-    top_gains = sorted(results, key=lambda x: x["age_add"], reverse=True)[:5]
+    # Top gains — high risk weight-3 markers
+    top_gains = []
+    gain_labels = {
+        "lpa": "Manage Lp(a) CVD risk factors", "apob": "Lower ApoB below 80",
+        "hsCrp": "Reduce inflammation (hs-CRP)", "homocysteine": "Lower homocysteine below 8",
+        "lpir": "Improve LP-IR score below 45", "fastingInsulin": "Lower fasting insulin below 8",
+        "hba1c": "Bring HbA1c below 5.4%", "fastingGlucose": "Bring fasting glucose below 90",
+        "homaIr": "Reduce insulin resistance", "vitaminD": "Optimise Vitamin D above 40",
+        "vitaminB12": "Optimise B12 above 400", "alt": "Reduce liver stress (ALT)",
+        "egfr": "Protect kidney function (eGFR)", "tsh": "Optimise thyroid (TSH 1-2.5)",
+        "triglycerides": "Lower triglycerides below 100", "hdl": "Raise HDL above 50",
+    }
+    for key, detail in sorted(marker_details.items(), key=lambda x: -x[1]["score"]):
+        if detail["status"] != "optimal" and key in gain_labels:
+            domain = detail["domain"]
+            cfg = BIO_DOMAINS.get(domain, {})
+            penalty = detail["score"] / detail["max_score"] if detail["max_score"] else 0
+            yrs = round(penalty * cfg.get("max_penalty", 10) * cfg.get("weight", 0.1), 1)
+            if yrs > 0:
+                top_gains.append({"key": key, "label": detail["name"],
+                                   "gain_text": gain_labels.get(key, detail["name"]),
+                                   "age_add": yrs, "domain": domain})
+        if len(top_gains) >= 5:
+            break
 
     return {
         "biological_age": biological_age,
-        "chronological_age": chronological_age,
+        "chronological_age": chron,
         "delta": delta,
-        "sub_ages": sub_ages,
+        "interpretation": _interpret_delta(delta),
+        "sub_ages": {d: domain_scores[d]["domain_age"] or chron for d in ["cvd", "metabolic", "liver"]},
+        "sub_labels": {"cvd": "Heart age", "metabolic": "Metabolic age", "liver": "Organ age"},
+        "domain_scores": domain_scores,
         "top_gains": top_gains,
-        "domain_totals": domain_totals,
+        "marker_details": marker_details,
     }
 
 
@@ -1494,16 +1589,16 @@ body{background:#F5F4F1;font-family:'Inter',sans-serif;color:#1a1a1a;font-size:1
   </div>
   <div class="bio-sub">
     <div class="bio-sub-card">
+      <div class="bio-sub-num">{{ bio_age.sub_ages.cvd }}</div>
+      <div class="bio-sub-lbl">Heart age</div>
+    </div>
+    <div class="bio-sub-card">
       <div class="bio-sub-num">{{ bio_age.sub_ages.metabolic }}</div>
       <div class="bio-sub-lbl">Metabolic age</div>
     </div>
     <div class="bio-sub-card">
-      <div class="bio-sub-num">{{ bio_age.sub_ages.heart }}</div>
-      <div class="bio-sub-lbl">Heart age</div>
-    </div>
-    <div class="bio-sub-card">
-      <div class="bio-sub-num">{{ bio_age.sub_ages.inflammation }}</div>
-      <div class="bio-sub-lbl">Inflammation age</div>
+      <div class="bio-sub-num">{{ bio_age.sub_ages.liver }}</div>
+      <div class="bio-sub-lbl">Organ age</div>
     </div>
   </div>
 </div>
