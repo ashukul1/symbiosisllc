@@ -643,6 +643,102 @@ def run_engine(patient, lab_results):
     }
 
 
+
+# ═══════════════════════════════════════════════════════════════════
+# BIOLOGICAL AGE ENGINE — SA-specific weights
+# ═══════════════════════════════════════════════════════════════════
+BIO_AGE_WEIGHTS = {
+    # Metabolic domain — highest impact for SA
+    "hba1c":         {"optimal_max": 5.4, "moderate_add": 3, "high_add": 6,  "domain": "metabolic",     "label": "HbA1c",          "gain_text": "Bring HbA1c below 5.4%"},
+    "fastingInsulin":{"optimal_max": 8,   "moderate_add": 3, "high_add": 6,  "domain": "metabolic",     "label": "Fasting Insulin", "gain_text": "Lower fasting insulin below 8"},
+    "fastingGlucose":{"optimal_max": 90,  "moderate_add": 2, "high_add": 4,  "domain": "metabolic",     "label": "Fasting Glucose", "gain_text": "Bring fasting glucose below 90"},
+    "homaIr":        {"optimal_max": 1.5, "moderate_add": 2, "high_add": 5,  "domain": "metabolic",     "label": "HOMA-IR",         "gain_text": "Reduce insulin resistance (HOMA-IR)"},
+    "lpir":          {"optimal_max": 45,  "moderate_add": 3, "high_add": 7,  "domain": "metabolic",     "label": "LP-IR Score",     "gain_text": "Improve LP-IR score below 45"},
+    "tgHdlRatio":    {"optimal_max": 2.0, "moderate_add": 2, "high_add": 4,  "domain": "metabolic",     "label": "TG/HDL Ratio",    "gain_text": "Improve TG/HDL ratio below 2.0"},
+    # Cardiovascular domain
+    "hsCrp":         {"optimal_max": 1.0, "moderate_add": 2, "high_add": 5,  "domain": "heart",         "label": "hs-CRP",          "gain_text": "Reduce inflammation (hs-CRP below 1.0)"},
+    "apob":          {"optimal_max": 80,  "moderate_add": 2, "high_add": 4,  "domain": "heart",         "label": "ApoB",            "gain_text": "Lower ApoB below 80 mg/dL"},
+    "lpa":           {"optimal_max": 30,  "moderate_add": 1, "high_add": 3,  "domain": "heart",         "label": "Lp(a)",           "gain_text": "Lp(a) is genetic — manage other CV factors"},
+    "homocysteine":  {"optimal_max": 8,   "moderate_add": 2, "high_add": 4,  "domain": "heart",         "label": "Homocysteine",    "gain_text": "Lower homocysteine below 8 µmol/L"},
+    "triglycerides": {"optimal_max": 100, "moderate_add": 1, "high_add": 3,  "domain": "heart",         "label": "Triglycerides",   "gain_text": "Bring triglycerides below 100 mg/dL"},
+    "hdl":           {"optimal_min": 50,  "moderate_add": 1, "high_add": 3,  "domain": "heart",         "label": "HDL",             "gain_text": "Raise HDL above 50 mg/dL"},
+    # Inflammation / nutritional
+    "vitaminD":      {"optimal_min": 40,  "moderate_add": 1, "high_add": 2,  "domain": "inflammation",  "label": "Vitamin D",       "gain_text": "Optimise Vitamin D above 40 ng/mL"},
+    "vitaminB12":    {"optimal_min": 400, "moderate_add": 1, "high_add": 2,  "domain": "inflammation",  "label": "Vitamin B12",     "gain_text": "Optimise B12 above 400 pg/mL"},
+    "alt":           {"optimal_max": 25,  "moderate_add": 1, "high_add": 3,  "domain": "inflammation",  "label": "ALT",             "gain_text": "Reduce liver stress (ALT below 25)"},
+}
+
+DOMAIN_WEIGHTS = {
+    "metabolic":    0.45,
+    "heart":        0.35,
+    "inflammation": 0.20,
+}
+
+def compute_biological_age(chronological_age, lab_values, gender):
+    results = []
+    domain_totals = {"metabolic": 0, "heart": 0, "inflammation": 0}
+    domain_counts = {"metabolic": 0, "heart": 0, "inflammation": 0}
+
+    for key, cfg in BIO_AGE_WEIGHTS.items():
+        value = lab_values.get(key)
+        if value is None:
+            continue
+
+        age_add = 0
+        # Higher is worse markers
+        if "optimal_max" in cfg:
+            if value > cfg["optimal_max"] * 1.15:
+                age_add = cfg["high_add"]
+            elif value > cfg["optimal_max"]:
+                age_add = cfg["moderate_add"]
+        # Lower is worse markers
+        elif "optimal_min" in cfg:
+            if value < cfg["optimal_min"] * 0.75:
+                age_add = cfg["high_add"]
+            elif value < cfg["optimal_min"]:
+                age_add = cfg["moderate_add"]
+
+        domain = cfg["domain"]
+        domain_totals[domain] += age_add
+        domain_counts[domain] += 1
+
+        if age_add > 0:
+            results.append({
+                "key": key,
+                "label": cfg["label"],
+                "age_add": age_add,
+                "gain_text": cfg["gain_text"],
+                "domain": domain,
+            })
+
+    # Domain sub-ages
+    sub_ages = {}
+    for domain in ["metabolic", "heart", "inflammation"]:
+        sub_ages[domain] = round(chronological_age + domain_totals[domain])
+
+    # Weighted biological age
+    total_add = sum(
+        domain_totals[d] * DOMAIN_WEIGHTS[d]
+        for d in DOMAIN_WEIGHTS
+    )
+    biological_age = round(chronological_age + total_add)
+
+    # Age delta
+    delta = biological_age - chronological_age
+
+    # Top gains — sorted by impact
+    top_gains = sorted(results, key=lambda x: x["age_add"], reverse=True)[:5]
+
+    return {
+        "biological_age": biological_age,
+        "chronological_age": chronological_age,
+        "delta": delta,
+        "sub_ages": sub_ages,
+        "top_gains": top_gains,
+        "domain_totals": domain_totals,
+    }
+
+
 # ═══════════════════════════════════════════════════════════════════
 # CLAUDE PROMPT + API
 # ═══════════════════════════════════════════════════════════════════
@@ -1322,28 +1418,50 @@ def results(report_id):
 
 PATIENT_REPORT_HTML = """<!DOCTYPE html><html><head><title>Symbiosis Health</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=DM+Serif+Display&display=swap" rel="stylesheet">
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=DM+Serif+Display&display=swap');
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#F5F4F1;font-family:'Inter',sans-serif;color:#1a1a1a;font-size:13px}
-.page{max-width:860px;margin:0 auto;padding:24px 16px 48px}
+.page{max-width:900px;margin:0 auto;padding:24px 16px 48px}
 .topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
 .brand{font-family:'DM Serif Display',serif;font-size:18px;color:#1a1a1a}.brand span{color:#2D6A4F}
 .meta{font-size:12px;color:#9ca3af}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
-.card{background:#fff;border-radius:14px;border:1px solid #ECEAE6;padding:16px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}
+.card{background:#fff;border-radius:14px;border:1px solid #ECEAE6;padding:18px}
 .lbl{font-size:10px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px}
+/* Bio age hero */
+.bio-hero{background:linear-gradient(135deg,#1C4A3A 0%,#2D6A4F 100%);border-radius:16px;padding:24px;margin-bottom:12px;color:#fff}
+.bio-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
+.bio-ages{display:flex;align-items:flex-end;gap:24px}
+.bio-age-num{font-family:'DM Serif Display',serif;font-size:72px;line-height:1;color:#fff}
+.bio-age-lbl{font-size:11px;color:rgba(255,255,255,.6);margin-bottom:8px}
+.bio-vs{font-size:13px;color:rgba(255,255,255,.5);margin-bottom:4px;padding-bottom:8px}
+.bio-chrono{font-family:'DM Serif Display',serif;font-size:36px;color:rgba(255,255,255,.5);line-height:1}
+.bio-delta{background:rgba(255,255,255,.15);border-radius:10px;padding:8px 14px;text-align:center}
+.bio-delta-num{font-family:'DM Serif Display',serif;font-size:28px;color:#fff;line-height:1}
+.bio-delta-lbl{font-size:10px;color:rgba(255,255,255,.6);margin-top:2px}
+.bio-sub{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.bio-sub-card{background:rgba(255,255,255,.1);border-radius:10px;padding:12px;text-align:center}
+.bio-sub-num{font-size:22px;font-weight:600;color:#fff;line-height:1;margin-bottom:4px}
+.bio-sub-lbl{font-size:10px;color:rgba(255,255,255,.55)}
+/* Gains */
+.gain-item{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid #F5F4F1}
+.gain-item:last-child{border-bottom:none}
+.gain-text{font-size:12px;color:#374151;flex:1}
+.gain-badge{background:#F0F7F4;color:#2D6A4F;font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap;margin-left:10px}
+/* Score ring */
 .score-hero{display:flex;align-items:center;gap:20px}
-.score-ring{width:88px;height:88px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;border:5px solid currentColor;flex-shrink:0}
-.score-n{font-family:'DM Serif Display',serif;font-size:32px;line-height:1}
+.score-ring{width:80px;height:80px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;border:5px solid currentColor;flex-shrink:0}
+.score-n{font-family:'DM Serif Display',serif;font-size:28px;line-height:1}
 .score-d{font-size:9px;color:#9ca3af;margin-top:1px}
-.risk-badge{display:inline-flex;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;margin-top:8px}
+.risk-badge{display:inline-flex;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;margin-top:6px}
 .stat-mini{text-align:center}
-.stat-n{font-size:22px;font-weight:600;line-height:1;margin-bottom:3px}
+.stat-n{font-size:20px;font-weight:600;line-height:1;margin-bottom:3px}
 .stat-l{font-size:11px;color:#9ca3af}
-.drow{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.drow{display:flex;align-items:center;gap:10px;margin-bottom:7px}
 .drow:last-child{margin-bottom:0}
-.dlbl{font-size:12px;color:#6b7280;width:140px;flex-shrink:0}
+.dlbl{font-size:12px;color:#6b7280;width:130px;flex-shrink:0}
 .dtrack{flex:1;height:5px;background:#F0EEE9;border-radius:3px;overflow:hidden}
 .dfill{height:5px;border-radius:3px}
 .dpct{font-size:11px;font-weight:600;width:28px;text-align:right}
@@ -1356,7 +1474,6 @@ body{background:#F5F4F1;font-family:'Inter',sans-serif;color:#1a1a1a;font-size:1
 .chip-b{background:#fffbeb;color:#92400e}
 .pdot{width:7px;height:7px;border-radius:50%;flex-shrink:0;margin-top:3px}
 .pname{font-size:12px;font-weight:600;margin-bottom:2px}
-.pev{font-size:11px;color:#6b7280;line-height:1.5}
 .rhead{font-size:11px;font-weight:600;color:#2D6A4F;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;margin-top:14px}
 .rhead:first-child{margin-top:0}
 .ritem{display:flex;gap:8px;align-items:flex-start;margin-bottom:5px}
@@ -1367,12 +1484,51 @@ body{background:#F5F4F1;font-family:'Inter',sans-serif;color:#1a1a1a;font-size:1
 .next-btn{background:#2D6A4F;color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit}
 </style></head>
 <body><div class="page">
+
 <div class="topbar">
   <div class="brand">Symbiosis <span>Health</span></div>
   <div class="meta">{{ patient_name }} &nbsp;·&nbsp; {{ doctor_name }}</div>
 </div>
+
 {% set cc="#166534" if risk_category=="low" else "#92400e" if risk_category=="moderate" else "#b91c1c" %}
 {% set bg="#f0fdf4" if risk_category=="low" else "#fffbeb" if risk_category=="moderate" else "#fef2f2" %}
+{% set delta=bio_age.delta %}
+
+<!-- BIOLOGICAL AGE HERO -->
+<div class="bio-hero">
+  <div class="bio-top">
+    <div class="bio-ages">
+      <div>
+        <div class="bio-age-lbl">Biological age</div>
+        <div class="bio-age-num">{{ bio_age.biological_age }}</div>
+      </div>
+      <div style="padding-bottom:10px">
+        <div class="bio-vs">vs chronological</div>
+        <div class="bio-chrono">{{ bio_age.chronological_age }}</div>
+      </div>
+    </div>
+    <div class="bio-delta">
+      <div class="bio-delta-num">+{{ delta if delta > 0 else delta }}</div>
+      <div class="bio-delta-lbl">{{ "years older" if delta > 0 else "years younger" }}</div>
+    </div>
+  </div>
+  <div class="bio-sub">
+    <div class="bio-sub-card">
+      <div class="bio-sub-num">{{ bio_age.sub_ages.metabolic }}</div>
+      <div class="bio-sub-lbl">Metabolic age</div>
+    </div>
+    <div class="bio-sub-card">
+      <div class="bio-sub-num">{{ bio_age.sub_ages.heart }}</div>
+      <div class="bio-sub-lbl">Heart age</div>
+    </div>
+    <div class="bio-sub-card">
+      <div class="bio-sub-num">{{ bio_age.sub_ages.inflammation }}</div>
+      <div class="bio-sub-lbl">Inflammation age</div>
+    </div>
+  </div>
+</div>
+
+<!-- SA RISK + MARKERS -->
 <div class="grid2">
   <div class="card">
     <div class="lbl">SA Risk Score</div>
@@ -1382,8 +1538,8 @@ body{background:#F5F4F1;font-family:'Inter',sans-serif;color:#1a1a1a;font-size:1
         <div class="score-d">/ 100</div>
       </div>
       <div>
-        <div style="font-size:15px;font-weight:600;color:{{ cc }}">{{ risk_category_label }}</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:4px;line-height:1.5">Scored against SA-specific thresholds from MASALA, INTERHEART & JACC 2023</div>
+        <div style="font-size:14px;font-weight:600;color:{{ cc }}">{{ risk_category_label }}</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px;line-height:1.5">Scored against SA-specific thresholds</div>
         <div class="risk-badge" style="color:{{ cc }};background:{{ bg }}">{{ risk_category_label }}</div>
       </div>
     </div>
@@ -1408,6 +1564,21 @@ body{background:#F5F4F1;font-family:'Inter',sans-serif;color:#1a1a1a;font-size:1
     {% endif %}
   </div>
 </div>
+
+<!-- YEARS TO GAIN -->
+{% if bio_age.top_gains %}
+<div class="card" style="margin-bottom:12px">
+  <div class="lbl">How to reclaim years</div>
+  {% for g in bio_age.top_gains %}
+  <div class="gain-item">
+    <div class="gain-text">{{ g.gain_text }}</div>
+    <div class="gain-badge">+{{ g.age_add }} yrs back</div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- MARKERS -->
 <div class="grid2">
   {% if high_markers %}
   <div class="card">
@@ -1451,6 +1622,8 @@ body{background:#F5F4F1;font-family:'Inter',sans-serif;color:#1a1a1a;font-size:1
     {% endif %}
   </div>
 </div>
+
+<!-- RECOMMENDATIONS -->
 {% if summary_paras or recommendations %}
 <div class="card" style="margin-bottom:12px">
   {% if summary_paras %}
@@ -1470,6 +1643,7 @@ body{background:#F5F4F1;font-family:'Inter',sans-serif;color:#1a1a1a;font-size:1
   {% endif %}
 </div>
 {% endif %}
+
 <div class="next-bar">
   <div>
     <div style="font-size:13px;font-weight:600;color:#1a1a1a">Schedule your next panel</div>
@@ -1477,6 +1651,7 @@ body{background:#F5F4F1;font-family:'Inter',sans-serif;color:#1a1a1a;font-size:1
   </div>
   <button class="next-btn" onclick="alert('Booking coming soon!')">Book now →</button>
 </div>
+
 </div></body></html>"""
 
 
@@ -1574,6 +1749,13 @@ def patient_report(report_id):
         if k in MARKERS and v is not None and _score_marker(v, MARKERS[k]) == "optimal"
     )
 
+    # Biological age
+    bio_age = compute_biological_age(
+        chronological_age=row.get("age", 30),
+        lab_values=lab_values,
+        gender=row.get("gender", "female")
+    )
+
     return render(PATIENT_REPORT_HTML,
         patient_name=row.get("patient_name", "Patient"),
         doctor_name=row.get("doctor_name", "Symbiosis Health"),
@@ -1590,6 +1772,7 @@ def patient_report(report_id):
         recommendations=recommendations,
         summary_paras=summary_paras[:4],
         report_id=report_id,
+        bio_age=bio_age,
     )
 
 
