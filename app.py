@@ -867,7 +867,7 @@ def build_report_prompt(er):
     lab_vals_for_bio = {m["key"]: m["value"] for m in high + bord if m.get("value") is not None}
     bio = compute_biological_age(p.get("age", 30), lab_vals_for_bio, p.get("gender", "female"))
     bio_age_str = f"Biological age: {bio['biological_age']} (chronological: {bio['chronological_age']}, delta: +{bio['delta']} years)"
-    bio_sub_str = f"Metabolic age: {bio['sub_ages']['metabolic']} | Heart age: {bio['sub_ages']['heart']} | Inflammation age: {bio['sub_ages']['inflammation']}"
+    bio_sub_str = f"Heart age: {bio['sub_ages']['cvd']} | Metabolic age: {bio['sub_ages']['metabolic']} | Organ age: {bio['sub_ages']['liver']}"
 
     return f"""HARD CONSTRAINTS — NEVER VIOLATE:
 1. Never state or imply a specific diagnosis
